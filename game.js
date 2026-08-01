@@ -57,8 +57,12 @@ canvas.addEventListener('mousedown', e => {
   if (game.state === 'title') { startRun(); return; }
   if (game.state === 'play' && !game.paused && !mouse.locked) { requestLock(); return; }
   if (e.button === 0) mouse.down = true;
+  if (e.button === 2) player.adsHeld = true;
 });
-window.addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; });
+window.addEventListener('mouseup', e => {
+  if (e.button === 0) mouse.down = false;
+  if (e.button === 2) player.adsHeld = false;
+});
 window.addEventListener('contextmenu', e => e.preventDefault());
 
 document.addEventListener('pointerlockchange', () => {
@@ -71,8 +75,9 @@ document.addEventListener('pointerlockchange', () => {
 });
 document.addEventListener('mousemove', e => {
   if (!mouse.locked || game.state !== 'play' || game.paused) return;
-  player.dir -= e.movementX * 0.0022 * game.sensitivity;
-  player.pitch = clamp(player.pitch - e.movementY * 1.6 * game.sensitivity, -RH * 0.42, RH * 0.42);
+  const zoom = currentFov() / FOV;
+  player.dir -= e.movementX * 0.0022 * game.sensitivity * zoom;
+  player.pitch = clamp(player.pitch - e.movementY * 1.6 * game.sensitivity * zoom, -RH * 0.42, RH * 0.42);
 });
 function requestLock() { try { canvas.requestPointerLock(); } catch (err) {} }
 
@@ -103,6 +108,7 @@ function handleKeyPress(code) {
       if (code === 'Digit1') switchWeapon(0);
       if (code === 'Digit2') switchWeapon(1);
       if (code === 'Digit3') switchWeapon(2);
+      if (code === 'Digit4') switchWeapon(3);
     }
   }
   else if (game.state === 'dead') { if ((code === 'Enter' || code === 'Space') && game.stateT > 1.5) retryChapter(); }
@@ -332,9 +338,11 @@ const player = {
   swing: 0, hurtFlash: 0, dead: false, deadT: 0, deadFall: 0,
   bob: 0, bobAmt: 0, moving: 0, stepT: 0,
   kick: 0, kickX: 0, sway: 0, acidT: 0,
+  ads: 0, adsHeld: false, boltT: 0,
   weapons: [
     { name: "DAD'S COLT", type: 'revolver', owned: true, dmg: 34, rate: 0.34, mag: 6, ammo: 6, reserve: 42, reload: 1.6, spread: 0.02, pellets: 1, range: 26 },
     { name: "BARLOW'S 12-GAUGE", type: 'shotgun', owned: false, dmg: 15, rate: 0.85, mag: 6, ammo: 0, reserve: 0, reload: 0.55, spread: 0.13, pellets: 9, range: 14 },
+    { name: "DAD'S DEER RIFLE", type: 'rifle', owned: false, dmg: 130, rate: 1.15, mag: 5, ammo: 0, reserve: 0, reload: 2.4, spread: 0.006, pellets: 1, range: 60, scoped: true, adsFov: 0.19 },
     { name: 'FIRE AXE', type: 'axe', owned: true, dmg: 90, rate: 0.55, range: 1.5, arc: 1.5 }
   ]
 };
@@ -396,15 +404,17 @@ function resetPlayer(full) {
   player.dead = false; player.deadT = 0; player.deadFall = 0; player.hurtFlash = 0;
   player.reloading = false; player.fireCd = 0; player.swing = 0; player.kick = 0;
   screenSplats.length = 0; damageDirs.length = 0;
+  player.ads = 0; player.adsHeld = false; player.boltT = 0;
+  const [w0, w1, w2] = player.weapons;
   if (full) {
     player.weapon = 0;
-    const w0 = player.weapons[0], w1 = player.weapons[1];
     w0.owned = true; w0.ammo = 6; w0.reserve = 42;
     w1.owned = false; w1.ammo = 0; w1.reserve = 0;
+    w2.owned = false; w2.ammo = 0; w2.reserve = 0;
   } else {
-    const w0 = player.weapons[0], w1 = player.weapons[1];
     w0.ammo = w0.mag; w0.reserve = Math.max(w0.reserve, 30);
     if (w1.owned) { w1.ammo = w1.mag; w1.reserve = Math.max(w1.reserve, 10); }
+    if (w2.owned) { w2.ammo = w2.mag; w2.reserve = Math.max(w2.reserve, 8); }
   }
 }
 
@@ -430,12 +440,15 @@ function finishCard() {
   if (game.chapter === 1 && !player.weapons[1].owned) {
     spawnPickup(player.x + rand(-1.5, 1.5), player.y + rand(1, 2.5), 'shotgun');
   }
+  if (game.chapter === 2 && !player.weapons[2].owned) {
+    spawnPickup(player.x + rand(-1.5, 1.5), player.y + rand(1, 2.5), 'rifle');
+  }
   if (ch.boss) spawnBoss();
   requestLock();
 }
 
 function dropSupplies() {
-  for (let i = 0; i < 2; i++) spawnPickup(player.x + rand(-2.5, 2.5), player.y + rand(-2.5, 2.5), Math.random() < 0.5 ? 'ammoR' : 'ammoS');
+  for (let i = 0; i < 2; i++) spawnPickup(player.x + rand(-2.5, 2.5), player.y + rand(-2.5, 2.5), pick(['ammoR', 'ammoS', 'ammoF']));
   spawnPickup(player.x + rand(-2.5, 2.5), player.y + rand(-2.5, 2.5), 'medkit');
 }
 
@@ -454,8 +467,9 @@ function startNightmare() {
   game.kills = 0; game.gibs = 0; game.shots = 0; game.runTime = 0;
   buildMap();
   resetPlayer(false);
-  const w1 = player.weapons[1];
+  const w1 = player.weapons[1], w2 = player.weapons[2];
   w1.owned = true; w1.ammo = 6; w1.reserve = Math.max(w1.reserve, 16);
+  w2.owned = true; w2.ammo = 5; w2.reserve = Math.max(w2.reserve, 12);
   game.state = 'card'; game.stateT = 0;
   if (mouse.locked) document.exitPointerLock();
   game.chapter = 3;
@@ -630,6 +644,7 @@ function rayHitEnemy(px, py, dx, dy, maxT) {
 function tryFire() {
   const w = player.weapons[player.weapon];
   if (player.fireCd > 0) return;
+  if (w.type === 'rifle' && player.boltT > 0.35) return;
 
   if (w.type === 'axe') {
     player.fireCd = w.rate;
@@ -663,27 +678,43 @@ function tryFire() {
   w.ammo--; game.shots++;
   player.fireCd = w.rate;
   const big = w.type === 'shotgun';
-  player.kick = big ? 1 : 0.55;
-  player.kickX = rand(-0.4, 0.4);
-  player.pitch = clamp(player.pitch + (big ? 16 : 6), -RH * 0.42, RH * 0.42);
-  game.muzzleLight = big ? 0.14 : 0.09;
-  sfxShot(big);
-  addShake(big ? 0.5 : 0.26);
+  const rifle = w.type === 'rifle';
+  const aimed = easeAds(player.ads);
+  player.kick = big ? 1 : rifle ? 0.9 : 0.55;
+  player.kickX = rand(-0.4, 0.4) * (1 - aimed * 0.7);
+  player.pitch = clamp(player.pitch + (big ? 16 : rifle ? 13 : 6) * (1 - aimed * 0.45), -RH * 0.42, RH * 0.42);
+  game.muzzleLight = big ? 0.14 : rifle ? 0.15 : 0.09;
+  sfxShot(big || rifle);
+  addShake((big ? 0.5 : rifle ? 0.45 : 0.26) * (1 - aimed * 0.35));
+  if (rifle) player.boltT = 0.75;             // work the bolt before the next round
+
+  // Sights tighten the group; hip fire throws it wide.
+  const spread = w.spread * (1 - 0.82 * aimed);
 
   for (let i = 0; i < w.pellets; i++) {
-    const a = player.dir + rand(-w.spread, w.spread);
+    const a = player.dir + rand(-spread, spread);
     const dx = Math.cos(a), dy = Math.sin(a);
     const wallT = rayWallDist(player.x, player.y, dx, dy, w.range);
-    const hit = rayHitEnemy(player.x, player.y, dx, dy, Math.min(wallT, w.range));
-    if (hit) {
-      damageEnemy(hit.e, w.dmg, dx, dy, false);
-    } else if (wallT < w.range) {
+    let travelled = 0, dmg = w.dmg, punched = 0;
+    // The rifle drives straight through a body and keeps going.
+    while (true) {
+      const hit = rayHitEnemy(player.x + dx * travelled, player.y + dy * travelled,
+                              dx, dy, Math.min(wallT, w.range) - travelled);
+      if (!hit) break;
+      damageEnemy(hit.e, dmg, dx, dy, false);
+      if (!rifle || punched >= 2) { travelled += hit.t; break; }
+      punched++;
+      dmg *= 0.6;
+      travelled += hit.t + (hit.e.r + 0.05);
+      if (travelled >= Math.min(wallT, w.range)) break;
+    }
+    if (punched === 0 && travelled === 0 && wallT < w.range) {
       const hx = player.x + dx * wallT, hy = player.y + dy * wallT;
       sparks(hx, hy, 0.5 + rand(-0.2, 0.3), 2);
     }
     if (i === 0 || big) {
-      const len = hit ? hit.t : Math.min(wallT, w.range);
-      tracers.push({ x: player.x, y: player.y, dx, dy, len, life: 0.06 });
+      const len = travelled > 0 ? travelled : Math.min(wallT, w.range);
+      tracers.push({ x: player.x, y: player.y, dx, dy, len, life: rifle ? 0.09 : 0.06 });
     }
   }
 }
@@ -737,9 +768,10 @@ function killEnemy(e, dx, dy, dmg, melee) {
   if (multiKill.n >= 3) { game.slowmoT = 0.5; multiKill.n = 0; }
 
   const r = Math.random();
-  if (r < 0.14) spawnPickup(e.x, e.y, 'ammoR');
-  else if (r < 0.26 && player.weapons[1].owned) spawnPickup(e.x, e.y, 'ammoS');
-  else if (r < 0.33) spawnPickup(e.x, e.y, 'medkit');
+  if (r < 0.13) spawnPickup(e.x, e.y, 'ammoR');
+  else if (r < 0.23 && player.weapons[1].owned) spawnPickup(e.x, e.y, 'ammoS');
+  else if (r < 0.30 && player.weapons[2].owned) spawnPickup(e.x, e.y, 'ammoF');
+  else if (r < 0.37) spawnPickup(e.x, e.y, 'medkit');
 
   const i = enemies.indexOf(e);
   if (i >= 0) enemies.splice(i, 1);
@@ -783,6 +815,26 @@ function hurtPlayer(dmg, dirAngle) {
     if (mouse.locked) document.exitPointerLock();
   }
 }
+
+/* --------------------------------- ADS ------------------------------------ */
+// Hip fire is fast and loose; the sights are slow, steady and accurate.
+function scopedWeapon() {
+  const w = player.weapons[player.weapon];
+  return !!(w && w.scoped);
+}
+function canAds() {
+  const w = player.weapons[player.weapon];
+  return !!(w && w.type !== 'axe');
+}
+function adsFovTarget() {
+  const w = player.weapons[player.weapon];
+  return (w && w.adsFov) ? w.adsFov : FOV * 0.62;
+}
+function currentFov() {
+  return lerp(FOV, adsFovTarget(), easeAds(player.ads));
+}
+// Ease so the scope snaps up and settles instead of sliding linearly.
+function easeAds(t) { return t * t * (3 - 2 * t); }
 
 /* ------------------------------- CAMERA ----------------------------------- */
 const cam = { trauma: 0, shakeX: 0, shakeY: 0, shakeR: 0 };
@@ -919,7 +971,7 @@ function updatePlayer(dt) {
     if (player.staminaWait <= 0) player.stamina = Math.min(100, player.stamina + 22 * dt);
   }
 
-  const spd = sprinting ? player.sprintSpeed : player.speed;
+  const spd = (sprinting ? player.sprintSpeed : player.speed) * (1 - 0.45 * easeAds(player.ads));
   if (mag > 0) {
     const c = Math.cos(player.dir), s = Math.sin(player.dir);
     const dx = (c * fwd - s * strafe) / mag * spd * dt;
@@ -928,7 +980,7 @@ function updatePlayer(dt) {
     moveCircle(player, dx, dy);
     player.moving = sprinting ? 2 : 1;
     player.bob += dt * (sprinting ? 13 : 8.5);
-    player.bobAmt = lerp(player.bobAmt, sprinting ? 1.5 : 1, 0.1);
+    player.bobAmt = lerp(player.bobAmt, (sprinting ? 1.5 : 1) * (1 - 0.7 * easeAds(player.ads)), 0.1);
     player.stepT -= dt * (sprinting ? 2.4 : 1.7);
     if (player.stepT <= 0) { player.stepT = 1; sfxFootstep(); }
   } else {
@@ -944,6 +996,11 @@ function updatePlayer(dt) {
     if (Math.abs(player.vx) < 0.02) player.vx = 0;
     if (Math.abs(player.vy) < 0.02) player.vy = 0;
   }
+
+  // Raise / lower the sights
+  const wantAds = player.adsHeld && canAds() && !player.reloading;
+  player.ads = clamp(player.ads + (wantAds ? dt * 6.5 : -dt * 8), 0, 1);
+  if (player.boltT > 0) player.boltT -= dt;
 
   if (player.fireCd > 0) player.fireCd -= dt;
   if (player.swing > 0) player.swing -= dt;
@@ -1125,13 +1182,15 @@ function updatePickups(dt) {
     p.bob += dt * 3;
     if (player.dead) continue;
     if (Math.hypot(p.x - player.x, p.y - player.y) < 0.7) {
-      const wR = player.weapons[0], wS = player.weapons[1];
+      const wR = player.weapons[0], wS = player.weapons[1], wF = player.weapons[2];
       if (p.kind === 'medkit') {
         if (player.hp >= player.maxHp) continue;
         player.hp = Math.min(player.maxHp, player.hp + 35);
       } else if (p.kind === 'ammoR') wR.reserve = Math.min(120, wR.reserve + 12);
       else if (p.kind === 'ammoS') { if (!wS.owned) continue; wS.reserve = Math.min(60, wS.reserve + 5); }
+      else if (p.kind === 'ammoF') { if (!wF.owned) continue; wF.reserve = Math.min(40, wF.reserve + 4); }
       else if (p.kind === 'shotgun') { wS.owned = true; wS.ammo = 6; wS.reserve = 12; player.weapon = 1; }
+      else if (p.kind === 'rifle') { wF.owned = true; wF.ammo = 5; wF.reserve = 15; player.weapon = 2; }
       sfxPickup();
       pickups.splice(i, 1);
     }
@@ -1208,7 +1267,8 @@ function render() {
 
 function renderWorld() {
   const dirX = Math.cos(player.dir), dirY = Math.sin(player.dir);
-  const planeX = -dirY * FOV, planeY = dirX * FOV;
+  const fov = currentFov();
+  const planeX = -dirY * fov, planeY = dirX * fov;
 
   // Eye height & head bob (in wall-height units, 0.5 = eye level)
   const bobY = Math.sin(player.bob * 2) * 1.6 * player.bobAmt + player.kick * 5;
@@ -1218,13 +1278,26 @@ function renderWorld() {
 
   const fogLevel = CHAPTERS[game.chapter] ? CHAPTERS[game.chapter].fog : 1;
   const lightning = clamp(game.lightning / 0.5, 0, 1);
-  const ambient = 0.085 + lightning * 0.42 + game.muzzleLight;
+  // Glass gathers a little light of its own.
+  const aimT = easeAds(player.ads);
+  const ambient = 0.085 + lightning * 0.42 + game.muzzleLight + aimT * 0.05;
   const flashPower = 1.7 + game.muzzleLight * 4;
-  const fogDist = 15 - fogLevel * 6.5;   // fog closes in during the early chapters
+  // The beam covers a fixed angle of the WORLD, so zooming in spreads it across
+  // more of the screen. Rebuild the horizontal falloff whenever the zoom moves.
+  const zoom = FOV / fov;
+  const BEAM_HALF = 0.44;
+  for (let x = 0; x < RW; x++) {
+    const camX = 2 * x / RW - 1;
+    const ang = Math.atan(camX * fov);
+    flashX[x] = Math.pow(clamp(1 - Math.abs(ang) / BEAM_HALF, 0, 1), 1.7);
+  }
+  // Fog closes in during the early chapters; glass cuts through a little of it.
+  const fogDist = (15 - fogLevel * 6.5) * (1 + player.ads * (scopedWeapon() ? 1.5 : 0.35));
 
-  // Vertical flashlight falloff LUT
+  // Vertical flashlight falloff — same angular reasoning as the horizontal LUT
+  const vSpan = RH * 0.55 * zoom;
   for (let y = 0; y < RH; y++) {
-    const t = Math.abs(y - (horizon + RH * 0.06)) / (RH * 0.55);
+    const t = Math.abs(y - (horizon + RH * 0.06 * zoom)) / vSpan;
     flashY[y] = Math.pow(clamp(1 - t, 0, 1), 1.5);
   }
 
@@ -1414,7 +1487,8 @@ function renderWorld() {
         fogW, o.hitFlash > 0 ? 0.85 : 0, em, horizon, posZ);
     } else if (s.kind === 'pickup') {
       const spr = o.kind === 'medkit' ? SPR.medkit : o.kind === 'ammoR' ? SPR.ammoR :
-                  o.kind === 'ammoS' ? SPR.ammoS : SPR.shotgunPickup;
+                  o.kind === 'ammoS' ? SPR.ammoS : o.kind === 'ammoF' ? SPR.ammoF :
+                  o.kind === 'rifle' ? SPR.riflePickup : SPR.shotgunPickup;
       const bob = Math.sin(o.bob) * 0.04;
       drawSprite(spr, transX, transY, 0.16, 0.06 + bob, Math.max(0.55, ambient + beam + lampL), fogW * 0.6, 0, 1, horizon, posZ);
     } else if (s.kind === 'lamp') {
@@ -1556,26 +1630,38 @@ function drawViewmodel() {
   if (player.dead || game.state !== 'play') return;
   const w = player.weapons[player.weapon];
   const bar = Math.min(70, VH * 0.085);
-  const s = Math.min(VW / 1280, VH / 800) * 1.35;
+  const a = easeAds(player.ads);
+  const s = Math.min(VW / 1280, VH / 800) * 1.35 * (1 + a * 0.12);
   const bobX = Math.sin(player.bob) * 16 * player.bobAmt;
   const bobY = Math.abs(Math.cos(player.bob)) * 12 * player.bobAmt;
   const kick = player.kick;
-  // Anchored just under the letterbox so the gun body fills the lower right.
-  const ox = VW * 0.72 + bobX + player.kickX * 26;
-  const oy = VH - bar - 4 + bobY;
 
-  ctx.save();
-  ctx.translate(ox, oy);
-  ctx.scale(s, s);
-  if (w.type === 'revolver') drawRevolver(kick);
-  else if (w.type === 'shotgun') drawShotgun(kick);
-  else drawAxe();
-  ctx.restore();
+  // Hip: low and to the right. Sighted: dead centre, up at eye level.
+  const hipX = VW * 0.72, hipY = VH - bar - 4;
+  const aimX = VW / 2 + (w.type === 'shotgun' ? -27 : -21) * s;
+  const aimY = VH / 2 + (w.type === 'shotgun' ? 300 : 236) * s;
+  const ox = lerp(hipX, aimX, a) + bobX * (1 - a * 0.8) + player.kickX * 26 * (1 - a * 0.7);
+  const oy = lerp(hipY, aimY, a) + bobY * (1 - a * 0.8);
+
+  // A scope fills the frame, so the gun body is dropped once the glass is up.
+  const hideForScope = w.scoped && a > 0.72;
+  if (!hideForScope) {
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.scale(s, s);
+    if (w.type === 'revolver') drawRevolver(kick, a);
+    else if (w.type === 'shotgun') drawShotgun(kick, a);
+    else if (w.type === 'rifle') drawRifle(kick, a);
+    else drawAxe();
+    ctx.restore();
+  }
+
+  if (hideForScope) drawScopeOverlay(a);
 
   // Muzzle flash lights the whole frame from the barrel
   if (game.muzzleLight > 0.02 && w.type !== 'axe') {
-    const mx = ox + (w.type === 'shotgun' ? 27 : 21) * s;
-    const my = oy - (w.type === 'shotgun' ? 320 : 240) * s;
+    const mx = ox + (w.type === 'shotgun' ? 27 : w.type === 'rifle' ? 24 : 21) * s;
+    const my = oy - (w.type === 'shotgun' ? 320 : w.type === 'rifle' ? 372 : 240) * s;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const g = ctx.createRadialGradient(mx, my, 8, mx, my, VW * 0.55);
@@ -1591,9 +1677,10 @@ function drawViewmodel() {
 
 // Guns are drawn looking down them: origin at the bottom of the frame,
 // barrel receding up-screen toward the crosshair.
-function drawRevolver(kick) {
+function drawRevolver(kick, aimed) {
+  aimed = aimed || 0;
   ctx.save();
-  ctx.rotate(-0.05 - kick * 0.13);
+  ctx.rotate((-0.05 - kick * 0.13) * (1 - aimed));
   ctx.translate(0, kick * 34);
 
   // gloved hand wrapped round the grip
@@ -1627,10 +1714,19 @@ function drawRevolver(kick) {
   ctx.beginPath(); ctx.roundRect(6, -226, 30, 112, 5); ctx.fill();
   ctx.fillStyle = '#4d525a';
   ctx.fillRect(6, -226, 8, 112);
-  ctx.fillStyle = '#2b2e33';
-  ctx.fillRect(14, -244, 12, 20);          // front sight
   ctx.fillStyle = '#0d0f12';
   ctx.beginPath(); ctx.ellipse(21, -226, 8, 5, 0, 0, TAU); ctx.fill();
+  // rear notch and front blade — line them up
+  ctx.fillStyle = '#23262b';
+  ctx.fillRect(-4, -128, 48, 12);
+  ctx.fillStyle = '#0b0d10';
+  ctx.fillRect(16, -132, 8, 12);
+  ctx.fillStyle = '#2b2e33';
+  ctx.fillRect(14, -246, 12, 22);          // front blade
+  if (aimed > 0.5) {
+    ctx.fillStyle = `rgba(230,90,60,${(aimed - 0.5) * 2})`;
+    ctx.fillRect(17.5, -244, 5, 8);        // painted tip catches the light
+  }
 
   if (game.muzzleLight > 0.03) muzzleBurst(21, -228, 52);
   ctx.restore();
@@ -1663,10 +1759,11 @@ function muzzleBurst(x, y, r) {
   ctx.restore();
 }
 
-function drawShotgun(kick) {
+function drawShotgun(kick, aimed) {
+  aimed = aimed || 0;
   const pump = player.reloading ? Math.abs(Math.sin(game.time * 11)) * 46 : 0;
   ctx.save();
-  ctx.rotate(-0.04 - kick * 0.1);
+  ctx.rotate((-0.04 - kick * 0.1) * (1 - aimed));
   ctx.translate(0, kick * 46);
 
   // stock running back to the shoulder
@@ -1707,8 +1804,77 @@ function drawShotgun(kick) {
   }
   ctx.fillStyle = '#0d0f12';
   ctx.beginPath(); ctx.ellipse(27, -300, 12, 6, 0, 0, TAU); ctx.fill();
+  // brass bead on the rib
+  ctx.fillStyle = aimed > 0.5 ? '#e8c96a' : '#8a7a45';
+  ctx.beginPath(); ctx.arc(27, -292, 5.5, 0, TAU); ctx.fill();
 
   if (game.muzzleLight > 0.03) muzzleBurst(27, -302, 82);
+  ctx.restore();
+}
+
+// Bolt-action deer rifle: walnut stock, blued barrel, glass on top.
+function drawRifle(kick, aimed) {
+  aimed = aimed || 0;
+  const bolt = clamp(player.boltT / 0.75, 0, 1);
+  const cycle = Math.sin(bolt * Math.PI);
+  ctx.save();
+  ctx.rotate((-0.05 - kick * 0.12) * (1 - aimed));
+  ctx.translate(0, kick * 40);
+
+  // stock and comb
+  ctx.fillStyle = '#4a3018';
+  ctx.beginPath(); ctx.roundRect(6, -60, 64, 150, 14); ctx.fill();
+  ctx.fillStyle = '#3a2412';
+  ctx.beginPath(); ctx.roundRect(18, -30, 40, 112, 9); ctx.fill();
+  ctx.fillStyle = '#5c3c1e';
+  ctx.beginPath(); ctx.roundRect(2, -150, 58, 96, 10); ctx.fill();
+  // checkering on the grip
+  ctx.strokeStyle = 'rgba(30,18,8,0.55)'; ctx.lineWidth = 1.5;
+  for (let i = -3; i <= 3; i++) {
+    ctx.beginPath(); ctx.moveTo(14 + i * 7, -14); ctx.lineTo(30 + i * 7, 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(46 + i * 7, -14); ctx.lineTo(30 + i * 7, 40); ctx.stroke();
+  }
+  // receiver
+  ctx.fillStyle = '#33373d';
+  ctx.beginPath(); ctx.roundRect(6, -226, 52, 84, 6); ctx.fill();
+  ctx.fillStyle = '#42474e';
+  ctx.fillRect(6, -226, 10, 84);
+  // bolt handle, thrown back and returned after a shot
+  ctx.save();
+  ctx.translate(56 + cycle * 26, -186 + cycle * 34);
+  ctx.rotate(cycle * 0.7);
+  ctx.fillStyle = '#4c525a';
+  ctx.beginPath(); ctx.roundRect(0, -7, 40, 14, 6); ctx.fill();
+  ctx.beginPath(); ctx.arc(40, 0, 10, 0, TAU); ctx.fill();
+  ctx.restore();
+  // barrel
+  ctx.fillStyle = '#3a3e44';
+  ctx.beginPath(); ctx.roundRect(14, -372, 32, 150, 6); ctx.fill();
+  ctx.fillStyle = '#4a4f57';
+  ctx.fillRect(14, -372, 9, 150);
+  ctx.fillStyle = '#0d0f12';
+  ctx.beginPath(); ctx.ellipse(30, -372, 11, 6, 0, 0, TAU); ctx.fill();
+  // scope tube and rings
+  ctx.fillStyle = '#1c1f24';
+  ctx.beginPath(); ctx.roundRect(8, -340, 48, 132, 10); ctx.fill();
+  ctx.fillStyle = '#2a2e35';
+  ctx.beginPath(); ctx.roundRect(2, -318, 60, 26, 6); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(2, -246, 60, 26, 6); ctx.fill();
+  ctx.fillStyle = '#0a0c0f';
+  ctx.beginPath(); ctx.ellipse(32, -340, 24, 11, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(120,190,200,0.35)';
+  ctx.beginPath(); ctx.ellipse(32, -340, 18, 8, 0, 0, TAU); ctx.fill();
+  // forend
+  ctx.fillStyle = '#4a3018';
+  ctx.beginPath(); ctx.roundRect(8, -300 + 0, 46, 84, 10); ctx.fill();
+  // support hand
+  ctx.fillStyle = '#2b2f24';
+  ctx.beginPath(); ctx.roundRect(-14, -272, 60, 58, 16); ctx.fill();
+  ctx.strokeStyle = '#1a1c14'; ctx.lineWidth = 3;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(-10, -258 + i * 14); ctx.lineTo(40, -260 + i * 14); ctx.stroke();
+  }
+  if (game.muzzleLight > 0.03) muzzleBurst(30, -374, 74);
   ctx.restore();
 }
 
@@ -1764,6 +1930,98 @@ function drawAxe() {
   ctx.strokeStyle = 'rgba(90,14,17,0.75)'; ctx.lineWidth = 3.5;
   ctx.beginPath(); ctx.moveTo(-48, -196); ctx.lineTo(-42, -150); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-20, -188); ctx.lineTo(-16, -140); ctx.stroke();
+  ctx.restore();
+}
+
+// Looking through the glass: everything outside the tube goes black.
+function drawScopeOverlay(a) {
+  const cx = VW / 2, cy = VH / 2;
+  const R = Math.min(VW, VH) * 0.37;
+  // The scope drifts a little with breathing and settles when you hold still.
+  const sway = (1 - 0.65 * (player.moving ? 0 : 1));
+  const dx = Math.sin(game.time * 1.7) * 5 * sway + Math.sin(game.time * 0.9) * 3;
+  const dy = Math.cos(game.time * 1.3) * 4 * sway + player.kick * 30;
+  const ox = cx + dx, oy = cy + dy;
+
+  ctx.save();
+  ctx.globalAlpha = clamp((a - 0.72) / 0.28, 0, 1);
+
+  // scope body — everything outside the tube
+  ctx.beginPath();
+  ctx.rect(0, 0, VW, VH);
+  ctx.arc(ox, oy, R, 0, TAU, true);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+
+  // eye-relief shadow around the inside of the tube
+  const g = ctx.createRadialGradient(ox, oy, R * 0.74, ox, oy, R);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(ox, oy, R, 0, TAU); ctx.fill();
+
+  // a breath of glass glare across the top-left
+  const gl = ctx.createLinearGradient(ox - R, oy - R, ox + R * 0.3, oy + R * 0.4);
+  gl.addColorStop(0, 'rgba(150,210,220,0.10)');
+  gl.addColorStop(0.5, 'rgba(150,210,220,0.02)');
+  gl.addColorStop(1, 'rgba(150,210,220,0)');
+  ctx.fillStyle = gl;
+  ctx.beginPath(); ctx.arc(ox, oy, R, 0, TAU); ctx.fill();
+
+  // tube rim
+  ctx.strokeStyle = 'rgba(20,22,26,0.95)'; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.arc(ox, oy, R + 3, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = 'rgba(90,96,105,0.45)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(ox, oy, R - 1, 0, TAU); ctx.stroke();
+
+  // ---- duplex reticle ----
+  ctx.save();
+  ctx.beginPath(); ctx.arc(ox, oy, R - 2, 0, TAU); ctx.clip();
+  const thin = 1.8, thick = 5;
+  ctx.strokeStyle = 'rgba(10,10,12,0.95)';
+  // heavy outer posts
+  ctx.lineWidth = thick;
+  [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([px, py]) => {
+    ctx.beginPath();
+    ctx.moveTo(ox + px * R, oy + py * R);
+    ctx.lineTo(ox + px * R * 0.42, oy + py * R * 0.42);
+    ctx.stroke();
+  });
+  // fine crosshair with a gap at the centre
+  ctx.lineWidth = thin;
+  [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([px, py]) => {
+    ctx.beginPath();
+    ctx.moveTo(ox + px * R * 0.44, oy + py * R * 0.44);
+    ctx.lineTo(ox + px * R * 0.045, oy + py * R * 0.045);
+    ctx.stroke();
+  });
+  // mil ticks down the vertical for holdover
+  ctx.lineWidth = 1.4;
+  for (let i = 1; i <= 4; i++) {
+    const ty = oy + R * 0.1 * i;
+    const len = i % 2 === 0 ? 9 : 5;
+    ctx.beginPath(); ctx.moveTo(ox - len, ty); ctx.lineTo(ox + len, ty); ctx.stroke();
+  }
+  for (let i = 1; i <= 3; i++) {
+    const tx = ox + R * 0.12 * i;
+    ctx.beginPath(); ctx.moveTo(tx, oy - 4); ctx.lineTo(tx, oy + 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox - R * 0.12 * i, oy - 4); ctx.lineTo(ox - R * 0.12 * i, oy + 4); ctx.stroke();
+  }
+  // A dull red glow on the inner cross so it reads against the dark
+  ctx.strokeStyle = 'rgba(196,44,38,0.85)';
+  ctx.lineWidth = 1.5;
+  [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([px, py]) => {
+    ctx.beginPath();
+    ctx.moveTo(ox + px * R * 0.2, oy + py * R * 0.2);
+    ctx.lineTo(ox + px * R * 0.045, oy + py * R * 0.045);
+    ctx.stroke();
+  });
+  ctx.fillStyle = 'rgba(226,60,48,0.95)';
+  ctx.beginPath(); ctx.arc(ox, oy, 1.9, 0, TAU); ctx.fill();
+  ctx.shadowColor = 'rgba(226,60,48,0.7)'; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.arc(ox, oy, 1.2, 0, TAU); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
   ctx.restore();
 }
 
@@ -1869,8 +2127,10 @@ function renderHUD() {
   const bar = Math.min(70, VH * 0.085);
   ctx.save();
 
-  // Crosshair — four faint ticks, opening up with recoil
-  if (!player.dead) {
+  // Crosshair — four faint ticks, opening up with recoil.
+  // The sights replace it entirely once they are up.
+  if (!player.dead && player.ads < 0.45) {
+    ctx.globalAlpha = 1 - player.ads / 0.45;
     const cx = VW / 2, cy = VH / 2;
     const sp = 7 + player.kick * 22 + (player.moving ? 4 : 0);
     ctx.strokeStyle = 'rgba(220,215,200,0.5)';
@@ -1883,6 +2143,7 @@ function renderHUD() {
     }
     ctx.fillStyle = 'rgba(220,215,200,0.35)';
     ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.globalAlpha = 1;
   }
 
   // Directional damage indicators
@@ -1937,6 +2198,11 @@ function renderHUD() {
     ctx.font = "13px 'Courier New', monospace";
     if (player.reloading) { ctx.fillStyle = '#c9a84c'; ctx.fillText('RELOADING…', VW - 36, VH - bar - 62); }
     else if (w.ammo === 0 && w.reserve === 0) { ctx.fillStyle = '#c0242c'; ctx.fillText('FIND AMMO', VW - 36, VH - bar - 62); }
+    else if (w.type === 'rifle' && player.boltT > 0.35) { ctx.fillStyle = '#c9a84c'; ctx.fillText('WORKING THE BOLT', VW - 36, VH - bar - 62); }
+    if (player.ads > 0.7 && w.scoped) {
+      ctx.fillStyle = 'rgba(200,192,178,0.75)';
+      ctx.fillText(`${(FOV / adsFovTarget()).toFixed(1)}x`, VW - 36, VH - bar - 82);
+    }
   }
 
   // Objective line
@@ -1978,7 +2244,7 @@ function renderHUD() {
     ctx.globalAlpha = clamp(game.hint, 0, 1);
     ctx.font = "14px 'Courier New', monospace";
     ctx.fillStyle = 'rgba(220,212,195,0.85)';
-    ctx.fillText('WASD move · mouse look · click fire · SHIFT run · R reload · 1/2/3 weapons', VW / 2, VH - bar - 84);
+    ctx.fillText('WASD move · mouse look · LEFT CLICK fire · RIGHT CLICK aim down sights · SHIFT run · R reload', VW / 2, VH - bar - 84);
     ctx.globalAlpha = 1;
   }
 
@@ -2028,7 +2294,7 @@ function renderTitle() {
     ctx.fillText('CLICK OR PRESS ENTER TO BEGIN THE LAST SHIFT', VW / 2, VH * 0.66);
   }
   typeSet(14, true, 'rgba(140,140,150,0.6)');
-  ctx.fillText('WASD MOVE · MOUSE LOOK · CLICK FIRE · SHIFT RUN · R RELOAD · 1/2/3 WEAPONS · M MUTE', VW / 2, VH * 0.75);
+  ctx.fillText('WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · RIGHT CLICK AIM · SHIFT RUN · R RELOAD · M MUTE', VW / 2, VH * 0.75);
   typeSet(13, true, 'rgba(120,40,40,0.7)');
   ctx.fillText('contains considerable blood and guts', VW / 2, VH * 0.8);
   ctx.restore();
@@ -2150,8 +2416,8 @@ function renderPause() {
   typeSet(Math.min(46, VW * 0.045), false, 'rgba(210,200,185,0.9)');
   ctx.fillText('— INTERMISSION —', VW / 2, VH * 0.36);
   typeSet(15, true, 'rgba(190,182,170,0.8)');
-  ctx.fillText('WASD move · mouse look · SHIFT run · click fire · R reload', VW / 2, VH * 0.47);
-  ctx.fillText('1 colt · 2 shotgun · 3 axe (or mouse wheel) · M mute · F fullscreen', VW / 2, VH * 0.52);
+  ctx.fillText('WASD move · mouse look · SHIFT run · LEFT CLICK fire · RIGHT CLICK aim · R reload', VW / 2, VH * 0.47);
+  ctx.fillText('1 colt · 2 shotgun · 3 deer rifle · 4 axe (or mouse wheel) · M mute · F fullscreen', VW / 2, VH * 0.52);
   ctx.fillText('arrow keys turn and look if you prefer', VW / 2, VH * 0.57);
   typeSet(18, true, 'rgba(220,210,190,0.9)');
   ctx.fillText('CLICK OR PRESS ENTER TO GO BACK OUT THERE', VW / 2, VH * 0.68);

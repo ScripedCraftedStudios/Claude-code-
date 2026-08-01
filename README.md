@@ -16,6 +16,11 @@ every gib, and every corpse stays on the street for the whole night.
 
 ![Shotgun in the fog](screenshots/combat.png)
 
+Right-click brings the sights up — irons on the Colt and the twelve-gauge, and
+3.8× of glass on your father's deer rifle.
+
+![Down the scope](screenshots/scope.png)
+
 ## Play it
 
 No build, no dependencies. Clone and open `index.html` in any modern desktop
@@ -36,9 +41,10 @@ and to let the browser start the audio.
 | `WASD` | Move / strafe |
 | Mouse | Look (click to lock; `Esc` releases) |
 | Left click | Fire |
+| **Right click** | **Aim down sights** (hold) |
 | `Shift` | Sprint (stamina) |
 | `R` | Reload |
-| `1` / `2` / `3` or wheel | Dad's Colt · Barlow's 12-gauge · fire axe |
+| `1` / `2` / `3` / `4` or wheel | Dad's Colt · Barlow's 12-gauge · Dad's deer rifle · fire axe |
 | Arrow keys | Turn and look, if you'd rather not use the mouse |
 | `Esc` / `P` | Intermission |
 | `M` | Mute · `F` fullscreen |
@@ -51,7 +57,8 @@ and to let the browser start the audio.
 2. **THE CRAWLING KIND** — some of them move low and fast now. A twelve-gauge
    is lying on the sidewalk in a duffel bag.
 3. **WHAT THE DRAINS KEEP** — the swollen ones detonate into acid and viscera.
-   Keep your distance.
+   Keep your distance. Your father's scoped deer rifle is waiting where you
+   left it.
 4. **THE CONGREGATION** — all of Main Street at once.
 5. **THE HARVEST MAN** — taller than the streetlights, smiling. Bait his charge
    into a storefront and put the axe in him while he's down.
@@ -71,6 +78,15 @@ files, no engine.
   every creature frame are generated in code at load time.
 - **`game.js`** — camera, weapons, AI, the director, the chapter script and the
   film grade.
+- **Aim down sights**: holding right click raises the weapon to eye level,
+  narrows the camera FOV, scales mouse sensitivity with the zoom so aiming
+  stays proportional, tightens the group to a fifth of hip spread, steadies the
+  bob and slows your feet. The flashlight beam is angular rather than
+  screen-space, so zooming spreads it across more of the frame instead of
+  leaving you staring into a black tube.
+- **The deer rifle**: bolt-action, 3.8× duplex scope with an illuminated
+  centre, and enough behind the round to punch through two of them and kill the
+  one standing behind.
 - **Persistent gore** lives in a blood-decal layer sampled during floor
   casting: spray, pools, smears, bone, shell casings and corpses are stamped
   into the world and never despawn. By chapter four Main Street is a charnel

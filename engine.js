@@ -851,6 +851,23 @@ function buildSprites() {
     x.fillStyle = '#3d2c17'; x.fillRect(2, 5, 13, 7);
     x.fillStyle = '#5c421f'; x.fillRect(16, 7.5, 9, 5);
   });
+  SPR.ammoF = makeSpriteS(26, 18, 3, (x, w, h) => {
+    x.fillStyle = '#4a3a22'; x.fillRect(2, 5, w - 4, h - 7);
+    x.fillStyle = '#352a18'; x.fillRect(2, 5, w - 4, 3);
+    for (let i = 0; i < 4; i++) {
+      x.fillStyle = '#c9b061'; x.fillRect(4 + i * 5, 7, 3, 9);
+      x.fillStyle = '#8f7a3e'; x.fillRect(4 + i * 5, 7, 3, 2.5);
+    }
+  });
+  SPR.riflePickup = makeSpriteS(52, 18, 3, (x, w, h) => {
+    x.fillStyle = '#3a3e44'; x.fillRect(16, 7, 34, 4);          // barrel
+    x.fillStyle = '#4a3018'; x.fillRect(2, 6, 16, 8);           // stock
+    x.fillStyle = '#33373d'; x.fillRect(16, 5, 12, 8);          // receiver
+    x.fillStyle = '#1c1f24'; x.fillRect(18, 1.5, 18, 4.5);      // scope
+    x.fillStyle = '#2a2e35'; x.fillRect(20, 0.5, 3, 6.5);
+    x.fillStyle = '#2a2e35'; x.fillRect(31, 0.5, 3, 6.5);
+    x.fillStyle = 'rgba(120,190,200,0.5)'; x.fillRect(34, 2.5, 2, 2.5);
+  });
   SPR.lamp = makeSprite(24, 24, (x) => {
     const g = x.createRadialGradient(12, 12, 1, 12, 12, 12);
     g.addColorStop(0, 'rgba(255,232,180,1)');
