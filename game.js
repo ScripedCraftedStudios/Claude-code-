@@ -164,7 +164,7 @@ document.addEventListener('mousemove', e => {
   const zoom = currentFov() / hipFov();
   const sens = settings.sens * (1 + (settings.adsSens - 1) * easeAds(player.ads));
   const iy = settings.invertY ? -1 : 1;
-  player.dir -= e.movementX * 0.0022 * sens * zoom;
+  player.dir += e.movementX * 0.0022 * sens * zoom;
   player.pitch = clamp(player.pitch - e.movementY * 1.6 * sens * zoom * iy, -RH * 0.42, RH * 0.42);
 });
 function requestLock() { try { canvas.requestPointerLock(); } catch (err) {} }
@@ -490,7 +490,7 @@ const player = {
   ads: 0, adsHeld: false, boltT: 0,
   weapons: [
     { name: "DAD'S COLT", type: 'revolver', owned: true, dmg: 34, rate: 0.34, mag: 6, ammo: 6, reserve: 42, reload: 1.6, spread: 0.02, pellets: 1, range: 26 },
-    { name: "BARLOW'S 12-GAUGE", type: 'shotgun', owned: false, dmg: 15, rate: 0.85, mag: 6, ammo: 0, reserve: 0, reload: 0.55, spread: 0.13, pellets: 9, range: 14 },
+    { name: "CARRIGAN'S 12-GAUGE", type: 'shotgun', owned: false, dmg: 15, rate: 0.85, mag: 6, ammo: 0, reserve: 0, reload: 0.55, spread: 0.13, pellets: 9, range: 14 },
     { name: "DAD'S DEER RIFLE", type: 'rifle', owned: false, dmg: 130, rate: 1.15, mag: 5, ammo: 0, reserve: 0, reload: 2.4, spread: 0.006, pellets: 1, range: 60, scoped: true, adsFov: 0.19 },
     { name: 'FIRE AXE', type: 'axe', owned: true, dmg: 90, rate: 0.55, range: 1.5, arc: 1.5 }
   ]
@@ -517,12 +517,12 @@ const CHAPTERS = [
   {
     num: 'CHAPTER TWO', title: 'THE CRAWLING KIND', quota: 22, fog: 0.92, maxAlive: 9, interval: 1.8,
     types: [['shambler', 0.68], ['crawler', 0.32]],
-    text: "They used to be neighbors. Ed from the hardware store. The Kowalski twins. Now they moved wrong — low to the ground, fast, like things remembering how to be animals.\n\nSomebody had left Barlow's twelve-gauge in a duffel bag on the sidewalk. Dana didn't ask questions anymore."
+    text: "They used to be neighbors. Ed from the hardware store. The Kowalski twins. Now they moved wrong — low to the ground, fast, like things remembering how to be animals.\n\nSomebody had left Carrigan's twelve-gauge in a duffel bag on the sidewalk. Dana didn't ask questions anymore."
   },
   {
     num: 'CHAPTER THREE', title: 'WHAT THE DRAINS KEEP', quota: 30, fog: 0.86, maxAlive: 12, interval: 1.5,
     types: [['shambler', 0.55], ['crawler', 0.3], ['bloater', 0.15]],
-    text: "The drains had been whispering all summer. Old Tom Gedney said the town was built on something's mouth, and everyone laughed and bought him another beer.\n\nNobody laughed at Old Tom anymore. Some of the things coming up now were swollen with what they'd swallowed."
+    text: "The drains had been whispering all summer. Old Tom Doyle said the town was built on something's mouth, and everyone laughed and bought him another beer.\n\nNobody laughed at Old Tom anymore. Some of the things coming up now were swollen with what they'd swallowed."
   },
   {
     num: 'CHAPTER FOUR', title: 'THE CONGREGATION', quota: 42, fog: 0.8, maxAlive: 16, interval: 1.05,
@@ -1800,8 +1800,12 @@ function drawViewmodel() {
 
   // A scope fills the frame, so the gun body is dropped once the glass is up.
   const hideForScope = w.scoped && a > 0.72;
-  if (!hideForScope) {
+  const ironSighted = !w.scoped && (w.type === 'revolver' || w.type === 'shotgun');
+
+  // Hip profile, fading out as the sights come up
+  if (!hideForScope && !(ironSighted && a > 0.985)) {
     ctx.save();
+    ctx.globalAlpha = ironSighted ? 1 - a : 1;
     ctx.translate(ox, oy);
     ctx.scale(s, s);
     if (w.type === 'revolver') drawRevolver(kick, a);
@@ -1811,18 +1815,30 @@ function drawViewmodel() {
     ctx.restore();
   }
 
+  // Sight picture, fading in — origin sits exactly on the aim point
+  if (ironSighted && a > 0.015) {
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(VW / 2 + player.kickX * 8 * (1 - a), VH / 2 + bobY * (1 - a) * 0.5);
+    ctx.scale(s * 0.92, s * 0.92);
+    if (w.type === 'revolver') drawRevolverAimed(kick);
+    else drawShotgunAimed(kick);
+    ctx.restore();
+  }
+
   if (hideForScope) drawScopeOverlay(a);
 
   // Muzzle flash lights the whole frame from the barrel
   if (game.muzzleLight > 0.02 && w.type !== 'axe') {
-    const mx = ox + (w.type === 'shotgun' ? 27 : w.type === 'rifle' ? 24 : 21) * s;
-    const my = oy - (w.type === 'shotgun' ? 320 : w.type === 'rifle' ? 372 : 240) * s;
+    let mx = ox + (w.type === 'shotgun' ? 27 : w.type === 'rifle' ? 24 : 21) * s;
+    let my = oy - (w.type === 'shotgun' ? 320 : w.type === 'rifle' ? 372 : 240) * s;
+    if (ironSighted) { mx = lerp(mx, VW / 2, a); my = lerp(my, VH / 2, a); }
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const g = ctx.createRadialGradient(mx, my, 8, mx, my, VW * 0.55);
-    const a = game.muzzleLight * 3.2;
-    g.addColorStop(0, `rgba(255,225,160,${clamp(a, 0, 0.9)})`);
-    g.addColorStop(0.25, `rgba(255,190,100,${clamp(a * 0.4, 0, 0.4)})`);
+    const flashA = game.muzzleLight * 3.2;   // 'a' is the ADS amount in this scope
+    g.addColorStop(0, `rgba(255,225,160,${clamp(flashA, 0, 0.9)})`);
+    g.addColorStop(0.25, `rgba(255,190,100,${clamp(flashA * 0.4, 0, 0.4)})`);
     g.addColorStop(1, 'rgba(255,180,80,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, VW, VH);
@@ -1830,60 +1846,81 @@ function drawViewmodel() {
   }
 }
 
-// Guns are drawn looking down them: origin at the bottom of the frame,
-// barrel receding up-screen toward the crosshair.
+// Guns are drawn looking ALONG them: origin at the bottom of the frame, barrel
+// receding up-screen and converging toward the muzzle. Without the taper the
+// barrel reads as a flat tube pointing at the sky rather than down-range.
+function taperedBarrel(cx, nearY, nearW, farY, farW, top, lit, dark) {
+  ctx.fillStyle = top;
+  ctx.beginPath();
+  ctx.moveTo(cx - farW / 2, farY);
+  ctx.lineTo(cx + farW / 2, farY);
+  ctx.lineTo(cx + nearW / 2, nearY);
+  ctx.lineTo(cx - nearW / 2, nearY);
+  ctx.closePath(); ctx.fill();
+  if (lit) {
+    ctx.fillStyle = lit;
+    ctx.beginPath();
+    ctx.moveTo(cx - farW / 2, farY);
+    ctx.lineTo(cx - farW / 2 + farW * 0.3, farY);
+    ctx.lineTo(cx - nearW / 2 + nearW * 0.3, nearY);
+    ctx.lineTo(cx - nearW / 2, nearY);
+    ctx.closePath(); ctx.fill();
+  }
+  if (dark) {
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(cx + farW / 2 - farW * 0.24, farY);
+    ctx.lineTo(cx + farW / 2, farY);
+    ctx.lineTo(cx + nearW / 2, nearY);
+    ctx.lineTo(cx + nearW / 2 - nearW * 0.24, nearY);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
 function drawRevolver(kick, aimed) {
   aimed = aimed || 0;
   ctx.save();
-  ctx.rotate((-0.05 - kick * 0.13) * (1 - aimed));
-  ctx.translate(0, kick * 34);
+  ctx.rotate((-0.2 - kick * 0.16) * (1 - aimed * 0.7));
+  ctx.translate(0, kick * 30);
 
-  // gloved hand wrapped round the grip
+  // The hand is nearest the camera, so it is the biggest thing in frame.
   ctx.fillStyle = '#2b2f24';
-  ctx.beginPath(); ctx.roundRect(-16, -34, 74, 96, 18); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-24, -26, 88, 108, 22); ctx.fill();
   ctx.fillStyle = '#232619';
-  ctx.beginPath(); ctx.roundRect(-6, -18, 58, 26, 10); ctx.fill();
-  ctx.strokeStyle = '#171a12'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(-14, -6, 68, 30, 12); ctx.fill();
+  ctx.strokeStyle = '#171a12'; ctx.lineWidth = 3.5;
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(-10, 4 + i * 15); ctx.lineTo(46, 1 + i * 15); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-18, 18 + i * 17); ctx.lineTo(52, 14 + i * 17); ctx.stroke();
   }
-  // grip
+  // grip, angled back under the hand
   ctx.fillStyle = '#3a2a18';
-  ctx.beginPath(); ctx.roundRect(-2, -46, 40, 66, 8); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-4, -46, 44, 74, 9); ctx.fill();
   ctx.fillStyle = '#2b1f12';
-  ctx.beginPath(); ctx.roundRect(4, -40, 12, 54, 5); ctx.fill();
-  // frame + trigger guard
+  ctx.beginPath(); ctx.roundRect(4, -40, 13, 58, 5); ctx.fill();
+  // frame and trigger guard
   ctx.fillStyle = '#43474e';
-  ctx.beginPath(); ctx.roundRect(-6, -86, 52, 44, 6); ctx.fill();
-  ctx.strokeStyle = '#3a3e44'; ctx.lineWidth = 6;
-  ctx.beginPath(); ctx.arc(16, -40, 15, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
-  // cylinder
+  ctx.beginPath(); ctx.roundRect(-8, -96, 56, 54, 7); ctx.fill();
+  ctx.strokeStyle = '#3a3e44'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.arc(18, -40, 17, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+  // cylinder — near the camera, so wide
   ctx.fillStyle = '#565c65';
-  ctx.beginPath(); ctx.roundRect(-8, -118, 56, 40, 8); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-10, -134, 62, 44, 9); ctx.fill();
   ctx.fillStyle = '#24272c';
-  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(2 + i * 18, -98, 5.5, 0, TAU); ctx.fill(); }
+  for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(3 + i * 19, -112, 6, 0, TAU); ctx.fill(); }
   ctx.fillStyle = '#6a717b';
-  ctx.fillRect(-8, -118, 56, 5);
-  // barrel
-  ctx.fillStyle = '#3d4147';
-  ctx.beginPath(); ctx.roundRect(6, -226, 30, 112, 5); ctx.fill();
-  ctx.fillStyle = '#4d525a';
-  ctx.fillRect(6, -226, 8, 112);
+  ctx.fillRect(-10, -134, 62, 6);
+  // barrel, foreshortened and converging toward the muzzle
+  taperedBarrel(21, -132, 38, -228, 21, '#3d4147', '#4d525a', '#2e3238');
+  // muzzle and front blade at the far end
   ctx.fillStyle = '#0d0f12';
-  ctx.beginPath(); ctx.ellipse(21, -226, 8, 5, 0, 0, TAU); ctx.fill();
-  // rear notch and front blade — line them up
-  ctx.fillStyle = '#23262b';
-  ctx.fillRect(-4, -128, 48, 12);
-  ctx.fillStyle = '#0b0d10';
-  ctx.fillRect(16, -132, 8, 12);
+  ctx.beginPath(); ctx.ellipse(21, -228, 9, 4, 0, 0, TAU); ctx.fill();
   ctx.fillStyle = '#2b2e33';
-  ctx.fillRect(14, -246, 12, 22);          // front blade
+  ctx.fillRect(17, -240, 8, 13);
   if (aimed > 0.5) {
-    ctx.fillStyle = `rgba(230,90,60,${(aimed - 0.5) * 2})`;
-    ctx.fillRect(17.5, -244, 5, 8);        // painted tip catches the light
+    ctx.fillStyle = `rgba(200,56,46,${(aimed - 0.5) * 2})`;
+    ctx.fillRect(18.5, -238, 5, 8);
   }
-
-  if (game.muzzleLight > 0.03) muzzleBurst(21, -228, 52);
+  if (game.muzzleLight > 0.03) muzzleBurst(21, -230, 52);
   ctx.restore();
 }
 
@@ -1916,54 +1953,99 @@ function muzzleBurst(x, y, r) {
 
 function drawShotgun(kick, aimed) {
   aimed = aimed || 0;
-  const pump = player.reloading ? Math.abs(Math.sin(game.time * 11)) * 46 : 0;
+  const pump = player.reloading ? Math.abs(Math.sin(game.time * 11)) * 34 : 0;
   ctx.save();
-  ctx.rotate((-0.04 - kick * 0.1) * (1 - aimed));
-  ctx.translate(0, kick * 46);
+  ctx.rotate((-0.14 - kick * 0.12) * (1 - aimed * 0.7));
+  ctx.translate(0, kick * 40);
 
-  // stock running back to the shoulder
+  // stock going back over the shoulder — nearest the camera
   ctx.fillStyle = '#3d2c17';
-  ctx.beginPath(); ctx.roundRect(10, -40, 62, 130, 12); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(14, -30, 72, 128, 14); ctx.fill();
   ctx.fillStyle = '#2f2213';
-  ctx.beginPath(); ctx.roundRect(22, -20, 38, 96, 8); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(28, -10, 44, 92, 9); ctx.fill();
   // receiver
   ctx.fillStyle = '#43474e';
-  ctx.beginPath(); ctx.roundRect(2, -128, 74, 92, 7); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(2, -122, 82, 96, 8); ctx.fill();
   ctx.fillStyle = '#53585f';
-  ctx.fillRect(2, -128, 12, 92);
+  ctx.fillRect(2, -122, 14, 96);
   ctx.fillStyle = '#2b2e33';
-  ctx.beginPath(); ctx.roundRect(16, -46, 44, 12, 4); ctx.fill();
-  // shell port
+  ctx.beginPath(); ctx.roundRect(20, -40, 48, 13, 4); ctx.fill();
   ctx.fillStyle = '#16181c';
-  ctx.beginPath(); ctx.roundRect(54, -104, 18, 26, 4); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(62, -100, 19, 28, 4); ctx.fill();
 
-  // barrel + magazine tube
-  ctx.fillStyle = '#3d4147';
-  ctx.beginPath(); ctx.roundRect(10, -300, 34, 176, 6); ctx.fill();
-  ctx.fillStyle = '#4d525a';
-  ctx.fillRect(10, -300, 9, 176);
-  ctx.fillStyle = '#34383e';
-  ctx.beginPath(); ctx.roundRect(46, -280, 22, 156, 6); ctx.fill();
+  // barrel and magazine tube, both converging away from the camera
+  taperedBarrel(34, -120, 44, -268, 24, '#3d4147', '#4d525a', '#2e3238');
+  taperedBarrel(34, -118, 30, -252, 15, '#34383e', null, '#26292e');
 
   // pump forend, worked between shells
+  const py = -196 + pump;
   ctx.fillStyle = '#4a3520';
-  ctx.beginPath(); ctx.roundRect(4, -252 + pump, 68, 62, 9); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(10, py, 50, 54, 9); ctx.fill();
   ctx.fillStyle = '#3a2917';
-  for (let i = 0; i < 6; i++) ctx.fillRect(8, -244 + pump + i * 9, 60, 4);
-  // hand on the pump
+  for (let i = 0; i < 5; i++) ctx.fillRect(14, py + 7 + i * 9, 42, 4);
+  // support hand wrapped under the forend, tucked in rather than sticking out
   ctx.fillStyle = '#2b2f24';
-  ctx.beginPath(); ctx.roundRect(-14, -236 + pump, 62, 58, 16); ctx.fill();
-  ctx.strokeStyle = '#1a1c14'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(4, py + 18, 58, 52, 15); ctx.fill();
+  ctx.strokeStyle = '#1a1c14'; ctx.lineWidth = 3.5;
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(-10, -222 + pump + i * 14); ctx.lineTo(42, -224 + pump + i * 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, py + 32 + i * 13); ctx.lineTo(58, py + 30 + i * 13); ctx.stroke();
   }
+  // muzzle and bead
   ctx.fillStyle = '#0d0f12';
-  ctx.beginPath(); ctx.ellipse(27, -300, 12, 6, 0, 0, TAU); ctx.fill();
-  // brass bead on the rib
+  ctx.beginPath(); ctx.ellipse(34, -268, 11, 5, 0, 0, TAU); ctx.fill();
   ctx.fillStyle = aimed > 0.5 ? '#e8c96a' : '#8a7a45';
-  ctx.beginPath(); ctx.arc(27, -292, 5.5, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(34, -262, 5, 0, TAU); ctx.fill();
 
-  if (game.muzzleLight > 0.03) muzzleBurst(27, -302, 82);
+  if (game.muzzleLight > 0.03) muzzleBurst(34, -270, 82);
+  ctx.restore();
+}
+
+function drawRevolverAimed(kick) {
+  ctx.save();
+  ctx.translate(0, kick * 26);
+  taperedBarrel(0, 208, 54, 32, 24, '#3d4147', '#4d525a', '#2e3238');
+  // rear sight: two blocks with the notch between them, the blade sits in it
+  ctx.fillStyle = '#15181c';
+  ctx.fillRect(-34, 168, 27, 22);
+  ctx.fillRect(7, 168, 27, 22);
+  ctx.fillStyle = '#0a0c0e';
+  ctx.fillRect(-34, 186, 68, 5);
+  // front blade standing on the muzzle, tip exactly on the aim point
+  ctx.fillStyle = '#1e2126';
+  ctx.fillRect(-5, 0, 10, 33);
+  ctx.fillStyle = '#c8382e';
+  ctx.fillRect(-3.2, 2.5, 6.4, 11);
+  // top strap and the front of the cylinder
+  ctx.fillStyle = '#33373d';
+  ctx.fillRect(-31, 208, 62, 22);
+  ctx.fillStyle = '#565c65';
+  ctx.beginPath(); ctx.roundRect(-28, 228, 56, 30, 7); ctx.fill();
+  ctx.fillStyle = '#24272c';
+  ctx.beginPath(); ctx.arc(0, 243, 5.5, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawShotgunAimed(kick) {
+  ctx.save();
+  ctx.translate(0, kick * 32);
+  // vent rib running away from you, brass bead on the aim point
+  taperedBarrel(0, 212, 66, 28, 26, '#3a3e44', '#4a4f57', '#2c3036');
+  ctx.fillStyle = '#2b2f34';
+  for (let i = 0; i < 7; i++) {
+    const t = i / 7, y = 30 + t * 178, w = 26 + t * 40;
+    ctx.fillRect(-w * 0.11, y, w * 0.22, 4);
+  }
+  ctx.fillStyle = '#c9a84c';
+  ctx.beginPath(); ctx.arc(0, 8, 8, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#e8d08a';
+  ctx.beginPath(); ctx.arc(-2.2, 5.5, 3.2, 0, TAU); ctx.fill();
+  // magazine tube under the barrel, then the receiver
+  ctx.fillStyle = '#33373d';
+  ctx.fillRect(-36, 212, 72, 24);
+  ctx.fillStyle = '#43474e';
+  ctx.beginPath(); ctx.roundRect(-33, 234, 66, 26, 6); ctx.fill();
+  ctx.fillStyle = '#16181c';
+  ctx.beginPath(); ctx.roundRect(20, 240, 13, 14, 3); ctx.fill();
   ctx.restore();
 }
 
@@ -1973,63 +2055,61 @@ function drawRifle(kick, aimed) {
   const bolt = clamp(player.boltT / 0.75, 0, 1);
   const cycle = Math.sin(bolt * Math.PI);
   ctx.save();
-  ctx.rotate((-0.05 - kick * 0.12) * (1 - aimed));
-  ctx.translate(0, kick * 40);
+  ctx.rotate((-0.15 - kick * 0.13) * (1 - aimed * 0.7));
+  ctx.translate(0, kick * 36);
 
-  // stock and comb
+  // stock and comb — nearest the camera
   ctx.fillStyle = '#4a3018';
-  ctx.beginPath(); ctx.roundRect(6, -60, 64, 150, 14); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(16, -46, 76, 150, 16); ctx.fill();
   ctx.fillStyle = '#3a2412';
-  ctx.beginPath(); ctx.roundRect(18, -30, 40, 112, 9); ctx.fill();
-  ctx.fillStyle = '#5c3c1e';
-  ctx.beginPath(); ctx.roundRect(2, -150, 58, 96, 10); ctx.fill();
-  // checkering on the grip
-  ctx.strokeStyle = 'rgba(30,18,8,0.55)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(30, -18, 48, 116, 10); ctx.fill();
+  ctx.strokeStyle = 'rgba(30,18,8,0.55)'; ctx.lineWidth = 1.6;
   for (let i = -3; i <= 3; i++) {
-    ctx.beginPath(); ctx.moveTo(14 + i * 7, -14); ctx.lineTo(30 + i * 7, 40); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(46 + i * 7, -14); ctx.lineTo(30 + i * 7, 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(30 + i * 8, 0); ctx.lineTo(48 + i * 8, 56); ctx.stroke();
   }
   // receiver
   ctx.fillStyle = '#33373d';
-  ctx.beginPath(); ctx.roundRect(6, -226, 52, 84, 6); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(10, -152, 66, 108, 7); ctx.fill();
   ctx.fillStyle = '#42474e';
-  ctx.fillRect(6, -226, 10, 84);
-  // bolt handle, thrown back and returned after a shot
+  ctx.fillRect(10, -152, 12, 108);
+  // bolt handle, thrown and returned after a shot
   ctx.save();
-  ctx.translate(56 + cycle * 26, -186 + cycle * 34);
+  ctx.translate(72 + cycle * 24, -112 + cycle * 30);
   ctx.rotate(cycle * 0.7);
   ctx.fillStyle = '#4c525a';
-  ctx.beginPath(); ctx.roundRect(0, -7, 40, 14, 6); ctx.fill();
-  ctx.beginPath(); ctx.arc(40, 0, 10, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(0, -7, 36, 14, 6); ctx.fill();
+  ctx.beginPath(); ctx.arc(36, 0, 9, 0, TAU); ctx.fill();
   ctx.restore();
-  // barrel
-  ctx.fillStyle = '#3a3e44';
-  ctx.beginPath(); ctx.roundRect(14, -372, 32, 150, 6); ctx.fill();
-  ctx.fillStyle = '#4a4f57';
-  ctx.fillRect(14, -372, 9, 150);
-  ctx.fillStyle = '#0d0f12';
-  ctx.beginPath(); ctx.ellipse(30, -372, 11, 6, 0, 0, TAU); ctx.fill();
-  // scope tube and rings
-  ctx.fillStyle = '#1c1f24';
-  ctx.beginPath(); ctx.roundRect(8, -340, 48, 132, 10); ctx.fill();
-  ctx.fillStyle = '#2a2e35';
-  ctx.beginPath(); ctx.roundRect(2, -318, 60, 26, 6); ctx.fill();
-  ctx.beginPath(); ctx.roundRect(2, -246, 60, 26, 6); ctx.fill();
-  ctx.fillStyle = '#0a0c0f';
-  ctx.beginPath(); ctx.ellipse(32, -340, 24, 11, 0, 0, TAU); ctx.fill();
-  ctx.fillStyle = 'rgba(120,190,200,0.35)';
-  ctx.beginPath(); ctx.ellipse(32, -340, 18, 8, 0, 0, TAU); ctx.fill();
-  // forend
+
+  // barrel, foreshortened and converging toward the muzzle
+  taperedBarrel(42, -150, 40, -300, 21, '#3a3e44', '#4a4f57', '#2c3036');
+  // forend under it
   ctx.fillStyle = '#4a3018';
-  ctx.beginPath(); ctx.roundRect(8, -300 + 0, 46, 84, 10); ctx.fill();
-  // support hand
+  ctx.beginPath(); ctx.roundRect(20, -246, 46, 96, 11); ctx.fill();
+  ctx.fillStyle = '#3a2412';
+  ctx.beginPath(); ctx.roundRect(24, -238, 38, 80, 8); ctx.fill();
+  // support hand tucked under the forend
   ctx.fillStyle = '#2b2f24';
-  ctx.beginPath(); ctx.roundRect(-14, -272, 60, 58, 16); ctx.fill();
-  ctx.strokeStyle = '#1a1c14'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(12, -206, 58, 54, 15); ctx.fill();
+  ctx.strokeStyle = '#1a1c14'; ctx.lineWidth = 3.5;
   for (let i = 0; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(-10, -258 + i * 14); ctx.lineTo(40, -260 + i * 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(16, -192 + i * 14); ctx.lineTo(66, -194 + i * 14); ctx.stroke();
   }
-  if (game.muzzleLight > 0.03) muzzleBurst(30, -374, 74);
+  // scope sitting above the receiver, also foreshortened
+  taperedBarrel(42, -160, 52, -292, 30, '#1c1f24', '#2b3038', '#141619');
+  ctx.fillStyle = '#2a2e35';
+  ctx.beginPath(); ctx.roundRect(14, -186, 58, 22, 5); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(20, -268, 46, 18, 5); ctx.fill();
+  // objective lens at the far end
+  ctx.fillStyle = '#0a0c0f';
+  ctx.beginPath(); ctx.ellipse(42, -292, 16, 6, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(120,190,200,0.4)';
+  ctx.beginPath(); ctx.ellipse(42, -292, 11, 4, 0, 0, TAU); ctx.fill();
+  // muzzle
+  ctx.fillStyle = '#0d0f12';
+  ctx.beginPath(); ctx.ellipse(42, -300, 9, 4, 0, 0, TAU); ctx.fill();
+
+  if (game.muzzleLight > 0.03) muzzleBurst(42, -302, 74);
   ctx.restore();
 }
 

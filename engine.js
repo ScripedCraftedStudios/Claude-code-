@@ -324,7 +324,7 @@ function buildMap() {
   fillFloor(CSx1 + 1, 2, CSx1 + 1, MAP_H - 3, F_WALK);
 
   // ---- North side of Main Street ----
-  building(4, 18, 11, 24, W_BRICK, { hollow: true, door: 'S', sign: "BARLOW'S GROCERY" });
+  building(4, 18, 11, 24, W_BRICK, { hollow: true, door: 'S', sign: "CARRIGAN'S GROCERY" });
   building(13, 19, 19, 24, W_SIDING, { sign: 'PHARMACY' });
   building(21, 17, 25, 24, W_BRICK, { hollow: true, door: 'S', sign: 'MAINE DINER' });
   building(32, 18, 38, 24, W_SIDING, { sign: 'HARDWARE' });
@@ -334,7 +334,7 @@ function buildMap() {
   building(4, 33, 10, 39, W_SIDING, { sign: 'LAUNDROMAT' });
   building(12, 33, 19, 40, W_STONE, { hollow: true, door: 'N', sign: 'TOWN HALL' });
   building(21, 33, 25, 39, W_BRICK, { sign: 'POST OFFICE' });
-  building(32, 33, 38, 40, W_BRICK, { hollow: true, door: 'N', sign: "GEDNEY'S TAVERN" });
+  building(32, 33, 38, 40, W_BRICK, { hollow: true, door: 'N', sign: "THE ANCHOR TAVERN" });
   building(40, 33, 46, 39, W_STONE, { sign: 'SHERIFF' });
   building(48, 33, 52, 39, W_SIDING, { sign: 'MOTEL' });
   // ---- Church at the north end of Church Street ----

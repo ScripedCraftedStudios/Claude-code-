@@ -9,10 +9,13 @@ Miller's Pond at 3:11 AM, thick as wet wool. By 3:15 the phones were dead. By
 3:20 the screaming started. Sheriff Dana Pruitt loaded the revolver her father
 left her, picked up the flashlight, and stepped out onto Main Street.
 
-A first-person survival horror shooter in the spirit of a certain Maine
-paperback author — five chapters of fog, flickering streetlights, typewriter
-narration, and a truly indecent amount of blood and guts. Every drop of blood,
-every gib, and every corpse stays on the street for the whole night.
+A first-person survival horror shooter: five chapters of fog, flickering
+streetlights, typewriter narration, and a truly indecent amount of blood and
+guts. Every drop of blood, every gib, and every corpse stays on the street for
+the whole night.
+
+Original setting, original characters, and every asset — art, audio, the town
+itself — generated procedurally in code. Nothing licensed, nothing borrowed.
 
 ![Shotgun in the fog](screenshots/combat.png)
 
@@ -20,6 +23,8 @@ Right-click brings the sights up — irons on the Colt and the twelve-gauge, and
 3.8× of glass on your father's deer rifle.
 
 ![Down the scope](screenshots/scope.png)
+
+![Iron sights](screenshots/iron-sights.png)
 
 ## Play it
 
@@ -41,10 +46,10 @@ and to let the browser start the audio.
 | `WASD` | Move / strafe |
 | Mouse | Look (click to lock; `Esc` releases) |
 | Left click | Fire |
-| **Right click** | **Aim down sights** (hold) |
+| **Right click** | **Aim down sights** (hold, or toggle — your choice) |
 | `Shift` | Sprint (stamina) |
 | `R` | Reload |
-| `1` / `2` / `3` / `4` or wheel | Dad's Colt · Barlow's 12-gauge · Dad's deer rifle · fire axe |
+| `1` / `2` / `3` / `4` or wheel | Dad's Colt · Carrigan's 12-gauge · Dad's deer rifle · fire axe |
 | Arrow keys | Turn and look, if you'd rather not use the mouse |
 | `Esc` / `P` | Intermission |
 | `O` | Settings (from the title screen or the intermission) |
