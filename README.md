@@ -47,7 +47,24 @@ and to let the browser start the audio.
 | `1` / `2` / `3` / `4` or wheel | Dad's Colt · Barlow's 12-gauge · Dad's deer rifle · fire axe |
 | Arrow keys | Turn and look, if you'd rather not use the mouse |
 | `Esc` / `P` | Intermission |
+| `O` | Settings (from the title screen or the intermission) |
 | `M` | Mute · `F` fullscreen |
+
+## Settings
+
+Press `O` on the title screen or at the intermission. Click and drag the
+sliders, or use the arrow keys. Everything is saved to your browser.
+
+![Settings](screenshots/settings.png)
+
+Look sensitivity · sighted sensitivity (an extra multiplier that only applies
+while aiming, for taming the 3.8× scope) · invert Y · aim mode (hold or
+toggle) · aim speed · field of view · brightness · film grain · camera shake ·
+gore · volume.
+
+If the night is too dark to read on your monitor, or the sights come up too
+slowly, or you want the blood dialled up past what I shipped — that's what
+these are for.
 
 ![Main Street](screenshots/street.png)
 

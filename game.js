@@ -40,6 +40,73 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+/* ------------------------------ SETTINGS --------------------------------- */
+// Everything the tuning depends on lives here so it can be changed in-game
+// and survives a reload.
+const SETTINGS_KEY = 'harrows-end-settings';
+const SETTINGS_DEFS = [
+  { key: 'sens',      label: 'LOOK SENSITIVITY',  type: 'slider', min: 0.15, max: 3,    step: 0.05, def: 1,
+    fmt: v => v.toFixed(2) },
+  { key: 'adsSens',   label: 'SIGHTED SENS.',     type: 'slider', min: 0.3,  max: 2,    step: 0.05, def: 1,
+    fmt: v => v.toFixed(2) + '×',
+    hint: 'extra multiplier while aiming' },
+  { key: 'invertY',   label: 'INVERT LOOK Y',     type: 'toggle', def: false },
+  { key: 'adsToggle', label: 'AIM MODE',          type: 'toggle', def: false,
+    on: 'TOGGLE', off: 'HOLD' },
+  { key: 'adsSpeed',  label: 'AIM SPEED',         type: 'slider', min: 0.4,  max: 2.5,  step: 0.1,  def: 1,
+    fmt: v => v.toFixed(1) + '×' },
+  { key: 'fovDeg',    label: 'FIELD OF VIEW',     type: 'slider', min: 60,   max: 105,  step: 1,    def: 72,
+    fmt: v => Math.round(v) + '°' },
+  { key: 'brightness',label: 'BRIGHTNESS',        type: 'slider', min: 0.5,  max: 2.2,  step: 0.05, def: 1,
+    fmt: v => v.toFixed(2) },
+  { key: 'grain',     label: 'FILM GRAIN',        type: 'slider', min: 0,    max: 2,    step: 0.1,  def: 1,
+    fmt: v => v === 0 ? 'OFF' : v.toFixed(1) + '×' },
+  { key: 'shake',     label: 'CAMERA SHAKE',      type: 'slider', min: 0,    max: 1.6,  step: 0.1,  def: 1,
+    fmt: v => v === 0 ? 'OFF' : v.toFixed(1) + '×' },
+  { key: 'gore',      label: 'GORE',              type: 'slider', min: 0.2,  max: 2,    step: 0.1,  def: 1,
+    fmt: v => v.toFixed(1) + '×',
+    hint: 'blood, gibs and how long the street remembers' },
+  { key: 'volume',    label: 'VOLUME',            type: 'slider', min: 0,    max: 1,    step: 0.05, def: 0.5,
+    fmt: v => v === 0 ? 'MUTED' : Math.round(v * 100) + '%' },
+  { key: '__reset',   label: 'RESET TO DEFAULTS', type: 'action' },
+  { key: '__back',    label: 'BACK',              type: 'action' }
+];
+
+const settings = {};
+function defaultSettings() {
+  const o = {};
+  for (const d of SETTINGS_DEFS) if (d.type !== 'action') o[d.key] = d.def;
+  return o;
+}
+function loadSettings() {
+  Object.assign(settings, defaultSettings());
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      for (const d of SETTINGS_DEFS) {
+        if (d.type === 'action' || !(d.key in saved)) continue;
+        const v = saved[d.key];
+        if (d.type === 'toggle' && typeof v === 'boolean') settings[d.key] = v;
+        else if (d.type === 'slider' && typeof v === 'number' && isFinite(v)) {
+          settings[d.key] = clamp(v, d.min, d.max);
+        }
+      }
+    }
+  } catch (e) { /* private mode, corrupt json — defaults are fine */ }
+  applySettings();
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+function applySettings() {
+  if (audio.master) audio.master.gain.value = audio.muted ? 0 : settings.volume;
+}
+// Camera plane half-width from the chosen horizontal FOV
+function hipFov() { return Math.tan(settings.fovDeg * Math.PI / 360); }
+
+const ui = { x: 0, y: 0, down: false, sel: 0, dragging: null, returnTo: 'title' };
+
 /* ------------------------------- INPUT ----------------------------------- */
 const keys = {};
 const mouse = { down: false, locked: false };
@@ -54,14 +121,24 @@ window.addEventListener('keyup', e => { keys[e.code] = false; });
 
 canvas.addEventListener('mousedown', e => {
   initAudio();
+  if (game.state === 'settings') {
+    if (e.button !== 0) return;
+    const i = settingsHit(ui.x, ui.y);
+    if (i < 0) return;
+    ui.sel = i;
+    const d = SETTINGS_DEFS[i];
+    if (d.type === 'slider') { ui.dragging = i; settingsSliderSet(i, ui.x); }
+    else settingsActivate(i);
+    return;
+  }
   if (game.state === 'title') { startRun(); return; }
   if (game.state === 'play' && !game.paused && !mouse.locked) { requestLock(); return; }
   if (e.button === 0) mouse.down = true;
-  if (e.button === 2) player.adsHeld = true;
+  if (e.button === 2) player.adsHeld = settings.adsToggle ? !player.adsHeld : true;
 });
 window.addEventListener('mouseup', e => {
-  if (e.button === 0) mouse.down = false;
-  if (e.button === 2) player.adsHeld = false;
+  if (e.button === 0) { mouse.down = false; if (ui.dragging !== null) { ui.dragging = null; saveSettings(); } }
+  if (e.button === 2 && !settings.adsToggle) player.adsHeld = false;
 });
 window.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -74,10 +151,21 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 document.addEventListener('mousemove', e => {
+  if (!mouse.locked) {
+    const r = canvas.getBoundingClientRect();
+    ui.x = e.clientX - r.left; ui.y = e.clientY - r.top;
+    if (game.state === 'settings') {
+      const i = settingsHit(ui.x, ui.y);
+      if (i >= 0) ui.sel = i;
+      if (ui.dragging !== null) settingsSliderSet(ui.dragging, ui.x);
+    }
+  }
   if (!mouse.locked || game.state !== 'play' || game.paused) return;
-  const zoom = currentFov() / FOV;
-  player.dir -= e.movementX * 0.0022 * game.sensitivity * zoom;
-  player.pitch = clamp(player.pitch - e.movementY * 1.6 * game.sensitivity * zoom, -RH * 0.42, RH * 0.42);
+  const zoom = currentFov() / hipFov();
+  const sens = settings.sens * (1 + (settings.adsSens - 1) * easeAds(player.ads));
+  const iy = settings.invertY ? -1 : 1;
+  player.dir -= e.movementX * 0.0022 * sens * zoom;
+  player.pitch = clamp(player.pitch - e.movementY * 1.6 * sens * zoom * iy, -RH * 0.42, RH * 0.42);
 });
 function requestLock() { try { canvas.requestPointerLock(); } catch (err) {} }
 
@@ -94,14 +182,27 @@ window.addEventListener('wheel', e => {
 }, { passive: true });
 
 function handleKeyPress(code) {
-  if (code === 'KeyM') { audio.muted = !audio.muted; if (audio.master) audio.master.gain.value = audio.muted ? 0 : 0.5; }
+  if (code === 'KeyM') { audio.muted = !audio.muted; applySettings(); }
   if (code === 'KeyF') { try { document.documentElement.requestFullscreen(); } catch (e) {} }
 
-  if (game.state === 'title') { if (code === 'Enter' || code === 'Space') startRun(); }
+  if (game.state === 'settings') {
+    if (code === 'Escape') closeSettings();
+    else if (code === 'ArrowUp' || code === 'KeyW') { ui.sel = (ui.sel - 1 + SETTINGS_DEFS.length) % SETTINGS_DEFS.length; sfxClick(); }
+    else if (code === 'ArrowDown' || code === 'KeyS') { ui.sel = (ui.sel + 1) % SETTINGS_DEFS.length; sfxClick(); }
+    else if (code === 'ArrowLeft' || code === 'KeyA') settingsNudge(ui.sel, -1);
+    else if (code === 'ArrowRight' || code === 'KeyD') settingsNudge(ui.sel, 1);
+    else if (code === 'Enter' || code === 'Space') settingsActivate(ui.sel);
+    return;
+  }
+  if (game.state === 'title') {
+    if (code === 'Enter' || code === 'Space') startRun();
+    else if (code === 'KeyO') openSettings('title');
+  }
   else if (game.state === 'card') { if ((code === 'Enter' || code === 'Space') && game.card.t > 1.2) finishCard(); }
   else if (game.state === 'play') {
     if (code === 'Escape') { game.paused = true; if (mouse.locked) document.exitPointerLock(); }
     else if (code === 'KeyP') { game.paused = !game.paused; if (game.paused && mouse.locked) document.exitPointerLock(); else requestLock(); }
+    else if (game.paused && code === 'KeyO') openSettings('play');
     else if (game.paused && (code === 'Enter' || code === 'Space')) { game.paused = false; requestLock(); }
     else if (!game.paused) {
       if (code === 'KeyR') startReload();
@@ -115,6 +216,54 @@ function handleKeyPress(code) {
   else if (game.state === 'win') { if ((code === 'Enter' || code === 'Space') && game.stateT > 2) startNightmare(); }
 }
 
+/* --------------------------- SETTINGS SCREEN ------------------------------ */
+function openSettings(from) {
+  ui.returnTo = from;
+  ui.sel = 0; ui.dragging = null;
+  game.state = 'settings';
+  if (mouse.locked) document.exitPointerLock();
+}
+function closeSettings() {
+  saveSettings();
+  game.state = ui.returnTo;
+  if (game.state === 'play') game.paused = true;   // back to the pause card, not straight into a swarm
+}
+function settingsRows() {
+  const rowH = Math.min(38, VH * 0.045);
+  const top = VH * 0.5 - (SETTINGS_DEFS.length * rowH) / 2 + rowH * 0.5;
+  return { rowH, top, w: Math.min(560, VW * 0.62) };
+}
+function settingsHit(mx, my) {
+  const { rowH, top, w } = settingsRows();
+  const x0 = VW / 2 - w / 2;
+  if (mx < x0 || mx > x0 + w) return -1;
+  const i = Math.floor((my - (top - rowH / 2)) / rowH);
+  return (i >= 0 && i < SETTINGS_DEFS.length) ? i : -1;
+}
+function settingsSliderSet(i, mx) {
+  const d = SETTINGS_DEFS[i];
+  if (d.type !== 'slider') return;
+  const { w } = settingsRows();
+  const bx = VW / 2 - w / 2 + w * 0.52, bw = w * 0.36;
+  const t = clamp((mx - bx) / bw, 0, 1);
+  const raw = d.min + t * (d.max - d.min);
+  settings[d.key] = clamp(Math.round(raw / d.step) * d.step, d.min, d.max);
+  applySettings();
+}
+function settingsActivate(i) {
+  const d = SETTINGS_DEFS[i];
+  if (d.type === 'toggle') { settings[d.key] = !settings[d.key]; sfxClick(); saveSettings(); }
+  else if (d.key === '__reset') { Object.assign(settings, defaultSettings()); applySettings(); saveSettings(); sfxReload(); }
+  else if (d.key === '__back') closeSettings();
+}
+function settingsNudge(i, dir) {
+  const d = SETTINGS_DEFS[i];
+  if (d.type === 'slider') {
+    settings[d.key] = clamp(+(settings[d.key] + dir * d.step).toFixed(4), d.min, d.max);
+    applySettings(); saveSettings();
+  } else if (d.type === 'toggle') settingsActivate(i);
+}
+
 /* ------------------------------- AUDIO ----------------------------------- */
 const audio = { ctx: null, master: null, muted: false, noiseBuf: null, droneOn: false };
 
@@ -125,7 +274,7 @@ function initAudio() {
     if (!AC) return;
     audio.ctx = new AC();
     audio.master = audio.ctx.createGain();
-    audio.master.gain.value = audio.muted ? 0 : 0.5;
+    audio.master.gain.value = audio.muted ? 0 : (settings.volume === undefined ? 0.5 : settings.volume);
     audio.master.connect(audio.ctx.destination);
     const len = audio.ctx.sampleRate * 2;
     audio.noiseBuf = audio.ctx.createBuffer(1, len, audio.ctx.sampleRate);
@@ -553,6 +702,7 @@ function spawnPickup(x, y, kind) {
 
 /* -------------------------------- GORE ------------------------------------ */
 function bloodSpray(x, y, z, n, spread) {
+  n = Math.round(n * settings.gore);
   for (let i = 0; i < n; i++) {
     if (particles.length > 420) break;
     const a = rand(TAU), sp = rand(0.6, 4.5) * (spread || 1);
@@ -565,6 +715,7 @@ function bloodSpray(x, y, z, n, spread) {
   }
 }
 function bloodSprayDir(x, y, z, dx, dy, n) {
+  n = Math.round(n * settings.gore);
   for (let i = 0; i < n; i++) {
     if (particles.length > 420) break;
     const a = Math.atan2(dy, dx) + rand(-0.7, 0.7);
@@ -578,6 +729,7 @@ function bloodSprayDir(x, y, z, dx, dy, n) {
   }
 }
 function spawnGibs(x, y, z, n) {
+  n = Math.round(n * settings.gore);
   for (let i = 0; i < n; i++) {
     if (gibs.length > 70) break;
     const a = rand(TAU), sp = rand(1.5, 6.5);
@@ -828,17 +980,17 @@ function canAds() {
 }
 function adsFovTarget() {
   const w = player.weapons[player.weapon];
-  return (w && w.adsFov) ? w.adsFov : FOV * 0.62;
+  return (w && w.adsFov) ? w.adsFov : hipFov() * 0.62;
 }
 function currentFov() {
-  return lerp(FOV, adsFovTarget(), easeAds(player.ads));
+  return lerp(hipFov(), adsFovTarget(), easeAds(player.ads));
 }
 // Ease so the scope snaps up and settles instead of sliding linearly.
 function easeAds(t) { return t * t * (3 - 2 * t); }
 
 /* ------------------------------- CAMERA ----------------------------------- */
 const cam = { trauma: 0, shakeX: 0, shakeY: 0, shakeR: 0 };
-function addShake(v) { cam.trauma = Math.min(1, cam.trauma + v); }
+function addShake(v) { cam.trauma = Math.min(1, cam.trauma + v * settings.shake); }
 
 /* ------------------------------- UPDATE ----------------------------------- */
 function update(dt) {
@@ -856,7 +1008,7 @@ function update(dt) {
     if (game.card.t > 15) finishCard();
     return;
   }
-  if (game.state === 'title') { updateAmbient(dt); return; }
+  if (game.state === 'title' || game.state === 'settings') { updateAmbient(dt); return; }
   if (game.paused) return;
 
   if (game.slowmoT > 0) { game.slowmoT -= dt; game.timeScale = lerp(game.timeScale, 0.28, 0.3); }
@@ -999,7 +1151,8 @@ function updatePlayer(dt) {
 
   // Raise / lower the sights
   const wantAds = player.adsHeld && canAds() && !player.reloading;
-  player.ads = clamp(player.ads + (wantAds ? dt * 6.5 : -dt * 8), 0, 1);
+  const adsRate = settings.adsSpeed;
+  player.ads = clamp(player.ads + (wantAds ? dt * 6.5 * adsRate : -dt * 8 * adsRate), 0, 1);
   if (player.boltT > 0) player.boltT -= dt;
 
   if (player.fireCd > 0) player.fireCd -= dt;
@@ -1244,6 +1397,7 @@ function render() {
 
   if (game.state === 'title') { renderTitle(); return; }
   if (game.state === 'card') { renderCard(); return; }
+  if (game.state === 'settings') { renderSettings(); return; }
 
   renderWorld();
 
@@ -1280,11 +1434,12 @@ function renderWorld() {
   const lightning = clamp(game.lightning / 0.5, 0, 1);
   // Glass gathers a little light of its own.
   const aimT = easeAds(player.ads);
-  const ambient = 0.085 + lightning * 0.42 + game.muzzleLight + aimT * 0.05;
-  const flashPower = 1.7 + game.muzzleLight * 4;
+  const bright = settings.brightness;
+  const ambient = (0.085 + lightning * 0.42 + game.muzzleLight + aimT * 0.05) * bright;
+  const flashPower = (1.7 + game.muzzleLight * 4) * bright;
   // The beam covers a fixed angle of the WORLD, so zooming in spreads it across
   // more of the screen. Rebuild the horizontal falloff whenever the zoom moves.
-  const zoom = FOV / fov;
+  const zoom = hipFov() / fov;
   const BEAM_HALF = 0.44;
   for (let x = 0; x < RW; x++) {
     const camX = 2 * x / RW - 1;
@@ -1523,7 +1678,7 @@ function applyFilmGrain() {
     const c = fb[i];
     // Grain rides on the image: heavy in the midtones, almost gone in the blacks.
     const g0 = (c >>> 8) & 0xff;
-    const v = (noiseTab[(i + off) & NOISE_MASK] * (18 + g0)) >> 8;
+    const v = ((noiseTab[(i + off) & NOISE_MASK] * (18 + g0)) >> 8) * settings.grain;
     let r = (c & 0xff) + v, g = ((c >>> 8) & 0xff) + v, b = ((c >>> 16) & 0xff) + v;
     if (r < 0) r = 0; else if (r > 255) r = 255;
     if (g < 0) g = 0; else if (g > 255) g = 255;
@@ -2201,7 +2356,7 @@ function renderHUD() {
     else if (w.type === 'rifle' && player.boltT > 0.35) { ctx.fillStyle = '#c9a84c'; ctx.fillText('WORKING THE BOLT', VW - 36, VH - bar - 62); }
     if (player.ads > 0.7 && w.scoped) {
       ctx.fillStyle = 'rgba(200,192,178,0.75)';
-      ctx.fillText(`${(FOV / adsFovTarget()).toFixed(1)}x`, VW - 36, VH - bar - 82);
+      ctx.fillText(`${(hipFov() / adsFovTarget()).toFixed(1)}x`, VW - 36, VH - bar - 82);
     }
   }
 
@@ -2295,8 +2450,10 @@ function renderTitle() {
   }
   typeSet(14, true, 'rgba(140,140,150,0.6)');
   ctx.fillText('WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · RIGHT CLICK AIM · SHIFT RUN · R RELOAD · M MUTE', VW / 2, VH * 0.75);
+  typeSet(14, true, 'rgba(200,192,178,0.8)');
+  ctx.fillText('O — SETTINGS', VW / 2, VH * 0.8);
   typeSet(13, true, 'rgba(120,40,40,0.7)');
-  ctx.fillText('contains considerable blood and guts', VW / 2, VH * 0.8);
+  ctx.fillText('contains considerable blood and guts', VW / 2, VH * 0.845);
   ctx.restore();
 
   if (Math.random() < 0.05 && titleDrips.length < 14) {
@@ -2410,6 +2567,76 @@ function renderWin() {
   ctx.textAlign = 'left';
 }
 
+function renderSettings() {
+  ctx.fillStyle = 'rgba(3,3,4,0.93)';
+  ctx.fillRect(0, 0, VW, VH);
+
+  const { rowH, top, w } = settingsRows();
+  const x0 = VW / 2 - w / 2;
+
+  typeSet(Math.min(38, VW * 0.034), false, 'rgba(214,204,188,0.95)');
+  ctx.fillText('S E T T I N G S', VW / 2, top - rowH * 1.9);
+
+  for (let i = 0; i < SETTINGS_DEFS.length; i++) {
+    const d = SETTINGS_DEFS[i];
+    const y = top + i * rowH;
+    const on = i === ui.sel;
+
+    if (on) {
+      ctx.fillStyle = 'rgba(138,18,22,0.22)';
+      ctx.fillRect(x0 - 14, y - rowH * 0.5, w + 28, rowH);
+      ctx.fillStyle = '#8a1216';
+      ctx.fillRect(x0 - 14, y - rowH * 0.5, 3, rowH);
+    }
+
+    ctx.textAlign = 'left';
+    ctx.font = `${Math.min(15, VW * 0.0135)}px 'Courier New', monospace`;
+    if (d.type === 'action') {
+      ctx.fillStyle = on ? 'rgba(230,220,200,0.95)' : 'rgba(170,162,150,0.75)';
+      ctx.fillText(d.label, x0, y + 5);
+    } else {
+      ctx.fillStyle = on ? 'rgba(230,220,200,0.95)' : 'rgba(180,172,160,0.8)';
+      ctx.fillText(d.label, x0, y + 5);
+
+      const bx = x0 + w * 0.52, bw = w * 0.36;
+      if (d.type === 'slider') {
+        const t = (settings[d.key] - d.min) / (d.max - d.min);
+        ctx.fillStyle = 'rgba(255,255,255,0.09)';
+        ctx.fillRect(bx, y - 3, bw, 6);
+        ctx.fillStyle = on ? '#c0242c' : '#7a1013';
+        ctx.fillRect(bx, y - 3, bw * t, 6);
+        ctx.fillStyle = on ? 'rgba(240,232,215,0.95)' : 'rgba(190,182,170,0.8)';
+        ctx.fillRect(bx + bw * t - 2, y - 8, 4, 16);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = on ? 'rgba(235,226,208,0.95)' : 'rgba(175,167,155,0.8)';
+        ctx.fillText(d.fmt(settings[d.key]), x0 + w, y + 5);
+      } else {
+        const val = settings[d.key];
+        const onTxt = d.on || 'ON', offTxt = d.off || 'OFF';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = val ? '#c0242c' : 'rgba(150,144,134,0.8)';
+        ctx.fillText(val ? onTxt : offTxt, x0 + w, y + 5);
+      }
+    }
+  }
+
+  // hint line for the highlighted row
+  const sel = SETTINGS_DEFS[ui.sel];
+  ctx.textAlign = 'center';
+  ctx.font = `${Math.min(13, VW * 0.012)}px 'Courier New', monospace`;
+  ctx.fillStyle = 'rgba(150,144,134,0.7)';
+  if (sel && sel.hint) ctx.fillText(sel.hint, VW / 2, top + SETTINGS_DEFS.length * rowH + 6);
+  ctx.fillText('CLICK OR DRAG · ARROWS ADJUST · ENTER SELECT · ESC BACK',
+    VW / 2, top + SETTINGS_DEFS.length * rowH + 30);
+  ctx.fillStyle = 'rgba(120,114,106,0.6)';
+  ctx.fillText('saved to this browser', VW / 2, top + SETTINGS_DEFS.length * rowH + 50);
+
+  renderGrain();
+  ctx.drawImage(vignetteC, 0, 0);
+  renderLetterbox();
+  ctx.textAlign = 'left';
+}
+
 function renderPause() {
   ctx.fillStyle = 'rgba(0,0,0,0.74)';
   ctx.fillRect(0, 0, VW, VH);
@@ -2421,6 +2648,8 @@ function renderPause() {
   ctx.fillText('arrow keys turn and look if you prefer', VW / 2, VH * 0.57);
   typeSet(18, true, 'rgba(220,210,190,0.9)');
   ctx.fillText('CLICK OR PRESS ENTER TO GO BACK OUT THERE', VW / 2, VH * 0.68);
+  typeSet(15, true, 'rgba(190,182,170,0.8)');
+  ctx.fillText('O — SETTINGS', VW / 2, VH * 0.75);
   ctx.textAlign = 'left';
 }
 
@@ -2438,6 +2667,7 @@ function frame(t) {
   requestAnimationFrame(frame);
 }
 
+loadSettings();
 buildTextures();
 buildSprites();
 resize();
