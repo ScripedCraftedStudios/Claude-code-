@@ -51,9 +51,20 @@ and to let the browser start the audio.
 | `R` | Reload |
 | `1` / `2` / `3` / `4` or wheel | Dad's Colt · Carrigan's 12-gauge · Dad's deer rifle · fire axe |
 | Arrow keys | Turn and look, if you'd rather not use the mouse |
+| Gamepad | Fully supported — sticks, triggers to fire and aim, d-pad menus |
 | `Esc` / `P` | Intermission |
 | `O` | Settings (from the title screen or the intermission) |
 | `M` | Mute · `F` fullscreen |
+
+## Progress
+
+![Main menu](screenshots/menu.png)
+
+The town remembers. Chapters unlock as you reach them, cleared ones are marked,
+and **Continue** drops you back at the furthest chapter you got to — with the
+kit you would have picked up by then. Beating the finale unlocks **Nightmare
+Shift**, which keeps your best time. All of it is saved to your browser, and
+**Erase Progress** on the menu wipes it.
 
 ## Settings
 
@@ -65,7 +76,7 @@ sliders, or use the arrow keys. Everything is saved to your browser.
 Look sensitivity · sighted sensitivity (an extra multiplier that only applies
 while aiming, for taming the 3.8× scope) · invert Y · aim mode (hold or
 toggle) · aim speed · field of view · brightness · film grain · camera shake ·
-gore · volume.
+gamepad look · gore · volume.
 
 If the night is too dark to read on your monitor, or the sights come up too
 slowly, or you want the blood dialled up past what I shipped — that's what
@@ -116,6 +127,9 @@ files, no engine.
 - **Film look**: letterboxing, animated grain, vignette, cold night grade,
   lightning storms, screen shake, slow-motion multi-kills, typewriter chapter
   cards, and blood on the lens when something reaches you.
+- **Gamepad**: standard mapping throughout — sticks to move and look, triggers
+  to fire and aim, bumpers to cycle weapons, d-pad through every menu. Stick
+  look gets its own sensitivity, since it is continuous rather than a delta.
 - **Audio** is entirely WebAudio-synthesized — dread drone, wind, thunder,
   gunshots, wet squelches, and a heartbeat when you're nearly done.
 

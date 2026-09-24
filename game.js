@@ -50,6 +50,9 @@ const SETTINGS_DEFS = [
   { key: 'adsSens',   label: 'SIGHTED SENS.',     type: 'slider', min: 0.3,  max: 2,    step: 0.05, def: 1,
     fmt: v => v.toFixed(2) + '×',
     hint: 'extra multiplier while aiming' },
+  { key: 'padSens',   label: 'GAMEPAD LOOK',      type: 'slider', min: 0.2,  max: 3,    step: 0.05, def: 1,
+    fmt: v => v.toFixed(2),
+    hint: 'stick look speed — separate from the mouse' },
   { key: 'invertY',   label: 'INVERT LOOK Y',     type: 'toggle', def: false },
   { key: 'adsToggle', label: 'AIM MODE',          type: 'toggle', def: false,
     on: 'TOGGLE', off: 'HOLD' },
@@ -107,6 +110,46 @@ function hipFov() { return Math.tan(settings.fovDeg * Math.PI / 360); }
 
 const ui = { x: 0, y: 0, down: false, sel: 0, dragging: null, returnTo: 'title' };
 
+/* ------------------------------ PROGRESS --------------------------------- */
+// What the town remembers between visits.
+const PROGRESS_KEY = 'harrows-end-progress';
+const progress = { unlocked: 0, nightmare: false, cleared: [], bestNightmare: { time: 0, kills: 0 }, nights: 0 };
+
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (typeof p.unlocked === 'number') progress.unlocked = clamp(p.unlocked | 0, 0, CHAPTERS.length - 1);
+    if (typeof p.nightmare === 'boolean') progress.nightmare = p.nightmare;
+    if (Array.isArray(p.cleared)) progress.cleared = p.cleared.filter(n => typeof n === 'number');
+    if (typeof p.nights === 'number') progress.nights = p.nights | 0;
+    if (p.bestNightmare && typeof p.bestNightmare.time === 'number') {
+      progress.bestNightmare.time = p.bestNightmare.time;
+      progress.bestNightmare.kills = p.bestNightmare.kills | 0;
+    }
+  } catch (e) { /* private mode or corrupt — start fresh */ }
+}
+function saveProgress() {
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); } catch (e) {}
+}
+function markReached(chapterIdx) {
+  if (chapterIdx > progress.unlocked) { progress.unlocked = chapterIdx; saveProgress(); }
+}
+function markCleared(chapterIdx) {
+  if (!progress.cleared.includes(chapterIdx)) { progress.cleared.push(chapterIdx); saveProgress(); }
+}
+function recordNightmare() {
+  const b = progress.bestNightmare;
+  if (game.runTime > b.time) { b.time = game.runTime; b.kills = game.kills; saveProgress(); }
+}
+function eraseProgress() {
+  progress.unlocked = 0; progress.nightmare = false;
+  progress.cleared = []; progress.nights = 0;
+  progress.bestNightmare = { time: 0, kills: 0 };
+  saveProgress();
+}
+
 /* ------------------------------- INPUT ----------------------------------- */
 const keys = {};
 const mouse = { down: false, locked: false };
@@ -131,7 +174,11 @@ canvas.addEventListener('mousedown', e => {
     else settingsActivate(i);
     return;
   }
-  if (game.state === 'title') { startRun(); return; }
+  if (game.state === 'title') {
+    const i = menuHit(ui.x, ui.y);
+    if (i >= 0) { menu.sel = i; menuActivate(i); }
+    return;
+  }
   if (game.state === 'play' && !game.paused && !mouse.locked) { requestLock(); return; }
   if (e.button === 0) mouse.down = true;
   if (e.button === 2) player.adsHeld = settings.adsToggle ? !player.adsHeld : true;
@@ -158,6 +205,9 @@ document.addEventListener('mousemove', e => {
       const i = settingsHit(ui.x, ui.y);
       if (i >= 0) ui.sel = i;
       if (ui.dragging !== null) settingsSliderSet(ui.dragging, ui.x);
+    } else if (game.state === 'title') {
+      const i = menuHit(ui.x, ui.y);
+      if (i >= 0 && i !== menu.sel) { menu.sel = i; menu.confirming = -1; }
     }
   }
   if (!mouse.locked || game.state !== 'play' || game.paused) return;
@@ -172,13 +222,7 @@ function requestLock() { try { canvas.requestPointerLock(); } catch (err) {} }
 window.addEventListener('blur', () => { if (game.state === 'play') game.paused = true; });
 window.addEventListener('wheel', e => {
   if (game.state !== 'play' || game.paused) return;
-  const dir = e.deltaY > 0 ? 1 : -1;
-  let w = player.weapon;
-  for (let i = 0; i < 3; i++) {
-    w = (w + dir + player.weapons.length) % player.weapons.length;
-    if (player.weapons[w].owned) break;
-  }
-  switchWeapon(w);
+  cycleWeapon(e.deltaY > 0 ? 1 : -1);
 }, { passive: true });
 
 function handleKeyPress(code) {
@@ -195,8 +239,11 @@ function handleKeyPress(code) {
     return;
   }
   if (game.state === 'title') {
-    if (code === 'Enter' || code === 'Space') startRun();
+    if (code === 'ArrowUp' || code === 'KeyW') menuMove(-1);
+    else if (code === 'ArrowDown' || code === 'KeyS') menuMove(1);
+    else if (code === 'Enter' || code === 'Space') menuActivate(menu.sel);
     else if (code === 'KeyO') openSettings('title');
+    else if (code === 'Escape' && menu.page === 'chapters') { menu.page = 'main'; menu.sel = 0; }
   }
   else if (game.state === 'card') { if ((code === 'Enter' || code === 'Space') && game.card.t > 1.2) finishCard(); }
   else if (game.state === 'play') {
@@ -214,6 +261,82 @@ function handleKeyPress(code) {
   }
   else if (game.state === 'dead') { if ((code === 'Enter' || code === 'Space') && game.stateT > 1.5) retryChapter(); }
   else if (game.state === 'win') { if ((code === 'Enter' || code === 'Space') && game.stateT > 2) startNightmare(); }
+}
+
+/* ----------------------------- MAIN MENU --------------------------------- */
+// Built fresh each time it is drawn so it reflects what has been unlocked.
+const menu = { sel: 0, page: 'main' };
+
+function menuItems() {
+  const out = [];
+  if (menu.page === 'chapters') {
+    for (let i = 0; i < CHAPTERS.length; i++) {
+      const open = i <= progress.unlocked;
+      out.push({
+        label: open ? `${CHAPTERS[i].num} — ${CHAPTERS[i].title}` : `${CHAPTERS[i].num} — ————`,
+        note: progress.cleared.includes(i) ? 'CLEARED' : (open ? '' : 'LOCKED'),
+        disabled: !open,
+        run: () => startRun(i)
+      });
+    }
+    out.push({ label: 'BACK', run: () => { menu.page = 'main'; menu.sel = 0; } });
+    return out;
+  }
+  if (progress.unlocked > 0) {
+    const ch = CHAPTERS[progress.unlocked];
+    out.push({ label: 'CONTINUE', note: ch.num, run: () => startRun(progress.unlocked) });
+  }
+  out.push({ label: progress.unlocked > 0 ? 'NEW NIGHT' : 'BEGIN THE LAST SHIFT', run: () => startRun(0) });
+  if (progress.unlocked > 0) {
+    out.push({ label: 'CHAPTER SELECT', run: () => { menu.page = 'chapters'; menu.sel = 0; } });
+  }
+  if (progress.nightmare) {
+    const b = progress.bestNightmare;
+    out.push({
+      label: 'NIGHTMARE SHIFT',
+      note: b.time > 0 ? `BEST ${Math.floor(b.time / 60)}:${String(Math.floor(b.time % 60)).padStart(2, '0')}` : '',
+      run: () => startNightmare()
+    });
+  }
+  out.push({ label: 'SETTINGS', run: () => openSettings('title') });
+  if (progress.unlocked > 0 || progress.nightmare) {
+    out.push({ label: 'ERASE PROGRESS', confirm: true, run: () => { eraseProgress(); menu.sel = 0; } });
+  }
+  return out;
+}
+
+function menuLayout() {
+  const rowH = Math.min(34, VH * 0.042);
+  return { rowH, top: VH * 0.605, w: Math.min(520, VW * 0.6) };
+}
+function menuHit(mx, my) {
+  const items = menuItems();
+  const { rowH, top, w } = menuLayout();
+  const x0 = VW / 2 - w / 2;
+  if (mx < x0 || mx > x0 + w) return -1;
+  const i = Math.floor((my - (top - rowH / 2)) / rowH);
+  return (i >= 0 && i < items.length) ? i : -1;
+}
+function menuActivate(i) {
+  const items = menuItems();
+  const it = items[i];
+  if (!it || it.disabled) { sfxClick(); return; }
+  if (it.confirm && menu.confirming !== i) { menu.confirming = i; sfxClick(); return; }
+  menu.confirming = -1;
+  sfxReload();
+  it.run();
+}
+function menuMove(dir) {
+  const items = menuItems();
+  if (!items.length) return;
+  menu.confirming = -1;
+  let i = menu.sel;
+  for (let n = 0; n < items.length; n++) {
+    i = (i + dir + items.length) % items.length;
+    if (!items[i].disabled) break;
+  }
+  menu.sel = i;
+  sfxClick();
 }
 
 /* --------------------------- SETTINGS SCREEN ------------------------------ */
@@ -262,6 +385,114 @@ function settingsNudge(i, dir) {
     settings[d.key] = clamp(+(settings[d.key] + dir * d.step).toFixed(4), d.min, d.max);
     applySettings(); saveSettings();
   } else if (d.type === 'toggle') settingsActivate(i);
+}
+
+/* ------------------------------ GAMEPAD ---------------------------------- */
+// Standard mapping. Sticks are continuous, so look is applied per frame rather
+// than per event the way the mouse is.
+const pad = {
+  connected: false, moveX: 0, moveY: 0, sprint: false,
+  fire: false, ads: false, prev: {}, lastSeen: 0
+};
+const PAD_DEADZONE = 0.18;
+function padAxis(v) {
+  if (Math.abs(v) < PAD_DEADZONE) return 0;
+  const t = (Math.abs(v) - PAD_DEADZONE) / (1 - PAD_DEADZONE);
+  return Math.sign(v) * t * t;          // squared for fine control near centre
+}
+function padPressed(gp, i) {
+  const down = !!(gp.buttons[i] && gp.buttons[i].pressed);
+  const was = !!pad.prev[i];
+  pad.prev[i] = down;
+  return down && !was;
+}
+function padDown(gp, i) { return !!(gp.buttons[i] && gp.buttons[i].pressed); }
+
+function pollGamepad(dt) {
+  let gp = null;
+  const list = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const g of list) if (g && g.connected && g.mapping === 'standard') { gp = g; break; }
+  if (!gp) { for (const g of list) if (g && g.connected) { gp = g; break; } }
+  if (!gp) { pad.connected = false; pad.moveX = pad.moveY = 0; pad.fire = pad.ads = false; return; }
+  pad.connected = true;
+
+  const ax = gp.axes;
+  pad.moveX = padAxis(ax[0] || 0);
+  pad.moveY = padAxis(ax[1] || 0);
+  const lookX = padAxis(ax[2] || 0), lookY = padAxis(ax[3] || 0);
+
+  // Menus first — the sticks and d-pad drive the same rows the keyboard does.
+  if (game.state === 'title' || game.state === 'settings') {
+    const upNow = padDown(gp, 12) || lookY < -0.6 || pad.moveY < -0.6;
+    const downNow = padDown(gp, 13) || lookY > 0.6 || pad.moveY > 0.6;
+    pad.navT = (pad.navT || 0) - dt;
+    if (pad.navT <= 0 && (upNow || downNow)) {
+      pad.navT = 0.18;
+      const dir = upNow ? -1 : 1;
+      if (game.state === 'title') menuMove(dir);
+      else { ui.sel = (ui.sel + dir + SETTINGS_DEFS.length) % SETTINGS_DEFS.length; sfxClick(); }
+    }
+    if (!upNow && !downNow) pad.navT = 0;
+    if (game.state === 'settings') {
+      const l = padDown(gp, 14) || padAxis(ax[0] || 0) < -0.6;
+      const r = padDown(gp, 15) || padAxis(ax[0] || 0) > 0.6;
+      pad.adjT = (pad.adjT || 0) - dt;
+      if (pad.adjT <= 0 && (l || r)) { pad.adjT = 0.14; settingsNudge(ui.sel, l ? -1 : 1); }
+      if (!l && !r) pad.adjT = 0;
+      if (padPressed(gp, 0)) settingsActivate(ui.sel);
+      if (padPressed(gp, 1)) closeSettings();
+    } else {
+      if (padPressed(gp, 0)) menuActivate(menu.sel);
+      if (padPressed(gp, 1) && menu.page === 'chapters') { menu.page = 'main'; menu.sel = 0; }
+    }
+    pad.moveX = pad.moveY = 0;
+    return;
+  }
+
+  if (game.state === 'card') { if (padPressed(gp, 0) && game.card.t > 1.2) finishCard(); return; }
+  if (game.state === 'dead') { if (padPressed(gp, 0) && game.stateT > 1.5) retryChapter(); return; }
+  if (game.state === 'win') { if (padPressed(gp, 0) && game.stateT > 2) startNightmare(); return; }
+  if (game.state !== 'play') return;
+
+  if (padPressed(gp, 9) || padPressed(gp, 8)) {   // start / select
+    game.paused = !game.paused;
+    if (game.paused && mouse.locked) document.exitPointerLock();
+  }
+  if (game.paused) {
+    if (padPressed(gp, 0)) game.paused = false;
+    pad.moveX = pad.moveY = 0;
+    return;
+  }
+
+  // Look. A pad never needs pointer lock, so this works with the mouse released.
+  if (lookX || lookY) {
+    const zoom = currentFov() / hipFov();
+    const sens = settings.padSens * (1 + (settings.adsSens - 1) * easeAds(player.ads));
+    const iy = settings.invertY ? -1 : 1;
+    player.dir += lookX * 2.6 * sens * zoom * dt;
+    player.pitch = clamp(player.pitch - lookY * 520 * sens * zoom * iy * dt, -RH * 0.42, RH * 0.42);
+  }
+
+  const rt = gp.buttons[7], lt = gp.buttons[6];
+  pad.fire = !!(rt && (rt.pressed || rt.value > 0.4));
+  pad.ads = !!(lt && (lt.pressed || lt.value > 0.4));
+  pad.sprint = padDown(gp, 10);                    // left stick click
+
+  if (settings.adsToggle && padPressed(gp, 6)) player.adsHeld = !player.adsHeld;
+
+  if (padPressed(gp, 2)) startReload();            // X
+  if (padPressed(gp, 5)) cycleWeapon(1);           // RB
+  if (padPressed(gp, 4)) cycleWeapon(-1);          // LB
+  if (padPressed(gp, 3)) switchWeapon(3);          // Y — axe
+}
+
+function cycleWeapon(dir) {
+  let w = player.weapon;
+  for (let i = 0; i < player.weapons.length; i++) {
+    w = (w + dir + player.weapons.length) % player.weapons.length;
+    if (player.weapons[w].owned) break;
+  }
+  switchWeapon(w);
 }
 
 /* ------------------------------- AUDIO ----------------------------------- */
@@ -539,12 +770,17 @@ const CHAPTERS = [
 const EPILOGUE = "The fog lifted at dawn, the way it always does.\n\nThe town would bury its dead, repaint its doors, and never speak of it again. That's the thing about small towns in Maine. They keep their secrets.\n\nAnd their secrets keep them.";
 
 /* -------------------------------- FLOW ------------------------------------ */
-function startRun() {
+function startRun(chapterIdx) {
+  chapterIdx = chapterIdx || 0;
   game.kills = 0; game.gibs = 0; game.shots = 0; game.runTime = 0;
   game.endless = false; game.nightmareLevel = 0;
   buildMap();
   resetPlayer(true);
-  showCard(0);
+  // Starting mid-story hands you the kit you would have found by then.
+  const [w0, w1, w2] = player.weapons;
+  if (chapterIdx >= 2) { w1.owned = true; w1.ammo = w1.mag; w1.reserve = 16; }
+  if (chapterIdx >= 3) { w2.owned = true; w2.ammo = w2.mag; w2.reserve = 12; }
+  showCard(chapterIdx);
 }
 
 function resetPlayer(full) {
@@ -569,6 +805,7 @@ function resetPlayer(full) {
 
 function showCard(chapterIdx) {
   game.chapter = chapterIdx;
+  markReached(chapterIdx);
   game.state = 'card'; game.stateT = 0;
   if (mouse.locked) document.exitPointerLock();
   const ch = CHAPTERS[chapterIdx];
@@ -601,7 +838,10 @@ function dropSupplies() {
   spawnPickup(player.x + rand(-2.5, 2.5), player.y + rand(-2.5, 2.5), 'medkit');
 }
 
-function chapterComplete() { game.chapterDone = true; game.fadeOut = 0; }
+function chapterComplete() {
+  game.chapterDone = true; game.fadeOut = 0;
+  if (!game.endless) markCleared(game.chapter);
+}
 
 function retryChapter() {
   buildMap();
@@ -996,6 +1236,7 @@ function addShake(v) { cam.trauma = Math.min(1, cam.trauma + v * settings.shake)
 function update(dt) {
   game.time += dt;
   game.stateT += dt;
+  try { pollGamepad(dt); } catch (e) { /* no Gamepad API here */ }
   game.lampFlicker = 0.82 + 0.18 * Math.sin(game.time * 2.3) * Math.sin(game.time * 7.1);
 
   if (game.state === 'card') {
@@ -1026,7 +1267,10 @@ function update(dt) {
     else {
       player.deadT += dt;
       player.deadFall = Math.min(1, player.deadFall + dt * 1.4);
-      if (player.deadT > 2.4) { game.state = 'dead'; game.stateT = 0; }
+      if (player.deadT > 2.4) {
+        game.state = 'dead'; game.stateT = 0;
+        if (game.endless) recordNightmare();
+      }
     }
     updateDirector(sdt);
     updateEnemies(sdt);
@@ -1038,7 +1282,11 @@ function update(dt) {
       game.fadeOut += dt;
       if (game.fadeOut > 2.4) {
         if (game.endless) { game.fadeOut = 0; game.chapterDone = false; }
-        else if (game.chapter >= CHAPTERS.length - 1) { game.state = 'win'; game.stateT = 0; if (mouse.locked) document.exitPointerLock(); }
+        else if (game.chapter >= CHAPTERS.length - 1) {
+          game.state = 'win'; game.stateT = 0;
+          progress.nightmare = true; progress.nights++; saveProgress();
+          if (mouse.locked) document.exitPointerLock();
+        }
         else showCard(game.chapter + 1);
       }
     }
@@ -1115,8 +1363,9 @@ function updatePlayer(dt) {
   if (keys['KeyS']) fwd -= 1;
   if (keys['KeyD']) strafe += 1;
   if (keys['KeyA']) strafe -= 1;
+  if (pad.connected) { fwd -= pad.moveY; strafe += pad.moveX; }
   const mag = Math.hypot(fwd, strafe);
-  const sprinting = (keys['ShiftLeft'] || keys['ShiftRight']) && player.stamina > 1 && fwd > 0;
+  const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || pad.sprint) && player.stamina > 1 && fwd > 0;
   if (sprinting) { player.stamina = Math.max(0, player.stamina - 30 * dt); player.staminaWait = 0.8; }
   else {
     player.staminaWait -= dt;
@@ -1150,7 +1399,7 @@ function updatePlayer(dt) {
   }
 
   // Raise / lower the sights
-  const wantAds = player.adsHeld && canAds() && !player.reloading;
+  const wantAds = (player.adsHeld || (pad.ads && !settings.adsToggle)) && canAds() && !player.reloading;
   const adsRate = settings.adsSpeed;
   player.ads = clamp(player.ads + (wantAds ? dt * 6.5 * adsRate : -dt * 8 * adsRate), 0, 1);
   if (player.boltT > 0) player.boltT -= dt;
@@ -1177,7 +1426,7 @@ function updatePlayer(dt) {
       }
     }
   }
-  if (mouse.down && mouse.locked) tryFire();
+  if ((mouse.down && mouse.locked) || pad.fire) tryFire();
 
   for (const a of acidPools) {
     if (Math.hypot(player.x - a.x, player.y - a.y) < a.r) {
@@ -2484,7 +2733,7 @@ function renderHUD() {
   }
 
   // Pointer-lock prompt
-  if (!mouse.locked && !game.paused && !player.dead) {
+  if (!mouse.locked && !game.paused && !player.dead && !pad.connected) {
     ctx.textAlign = 'center';
     ctx.font = "16px 'Courier New', monospace";
     ctx.fillStyle = `rgba(220,210,190,${0.5 + 0.5 * Math.sin(game.time * 3)})`;
@@ -2524,16 +2773,14 @@ function renderTitle() {
   ctx.shadowBlur = 0;
   typeSet(Math.min(22, VW * 0.02), false, 'rgba(190,180,170,0.85)');
   ctx.fillText('every small town keeps a harvest', VW / 2, VH * 0.52);
-  if (t > 1.6 && Math.sin(t * 2.4) > -0.4) {
-    typeSet(Math.min(24, VW * 0.021), true, 'rgba(220,210,190,0.9)');
-    ctx.fillText('CLICK OR PRESS ENTER TO BEGIN THE LAST SHIFT', VW / 2, VH * 0.66);
-  }
-  typeSet(14, true, 'rgba(140,140,150,0.6)');
-  ctx.fillText('WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · RIGHT CLICK AIM · SHIFT RUN · R RELOAD · M MUTE', VW / 2, VH * 0.75);
-  typeSet(14, true, 'rgba(200,192,178,0.8)');
-  ctx.fillText('O — SETTINGS', VW / 2, VH * 0.8);
+  ctx.restore();
+
+  drawMainMenu(t);
+
+  ctx.save();
+  ctx.globalAlpha = clamp(t / 3, 0, 1);
   typeSet(13, true, 'rgba(120,40,40,0.7)');
-  ctx.fillText('contains considerable blood and guts', VW / 2, VH * 0.845);
+  ctx.fillText('contains considerable blood and guts', VW / 2, VH * 0.955);
   ctx.restore();
 
   if (Math.random() < 0.05 && titleDrips.length < 14) {
@@ -2550,6 +2797,57 @@ function renderTitle() {
   renderGrain();
   ctx.drawImage(vignetteC, 0, 0);
   renderLetterbox();
+  ctx.textAlign = 'left';
+}
+
+function drawMainMenu(t) {
+  const items = menuItems();
+  if (menu.sel >= items.length) menu.sel = items.length - 1;
+  const { rowH, top, w } = menuLayout();
+  const x0 = VW / 2 - w / 2;
+
+  ctx.save();
+  ctx.globalAlpha = clamp((t - 1.2) / 1.2, 0, 1);
+
+  if (menu.page === 'chapters') {
+    typeSet(Math.min(17, VW * 0.015), true, 'rgba(160,152,140,0.75)');
+    ctx.fillText('CHAPTER SELECT', VW / 2, top - rowH * 1.4);
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const y = top + i * rowH;
+    const on = i === menu.sel;
+    if (on && !it.disabled) {
+      ctx.fillStyle = 'rgba(138,18,22,0.25)';
+      ctx.fillRect(x0 - 14, y - rowH * 0.5, w + 28, rowH);
+      ctx.fillStyle = '#8a1216';
+      ctx.fillRect(x0 - 14, y - rowH * 0.5, 3, rowH);
+    }
+    ctx.textAlign = 'left';
+    ctx.font = `${Math.min(17, VW * 0.0152)}px 'Courier New', monospace`;
+    const confirming = menu.confirming === i;
+    ctx.fillStyle = it.disabled ? 'rgba(110,105,98,0.55)'
+                  : confirming ? '#c0242c'
+                  : on ? 'rgba(235,226,208,0.97)' : 'rgba(176,168,156,0.8)';
+    ctx.fillText(confirming ? it.label + ' — ARE YOU SURE?' : it.label, x0, y + 6);
+    if (it.note) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = it.disabled ? 'rgba(110,105,98,0.5)' : 'rgba(150,144,134,0.75)';
+      ctx.font = `${Math.min(13, VW * 0.0118)}px 'Courier New', monospace`;
+      ctx.fillText(it.note, x0 + w, y + 6);
+    }
+  }
+
+  ctx.textAlign = 'center';
+  typeSet(12, true, 'rgba(130,124,116,0.6)');
+  const hintY = top + items.length * rowH + rowH * 0.6;
+  ctx.fillText('WASD MOVE · MOUSE LOOK · LEFT CLICK FIRE · RIGHT CLICK AIM · SHIFT RUN · R RELOAD', VW / 2, hintY);
+  if (progress.nights > 0) {
+    ctx.fillStyle = 'rgba(150,144,134,0.55)';
+    ctx.fillText(`${progress.nights} night${progress.nights === 1 ? '' : 's'} survived`, VW / 2, hintY + 18);
+  }
+  ctx.restore();
   ctx.textAlign = 'left';
 }
 
@@ -2748,6 +3046,7 @@ function frame(t) {
 }
 
 loadSettings();
+loadProgress();
 buildTextures();
 buildSprites();
 resize();
