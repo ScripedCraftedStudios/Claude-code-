@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HARROW'S END — a small town keeps its harvest</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    cursor: crosshair;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  #game {
+    display: block;
+    width: 100vw; height: 100vh;
+    background: #000;
+  }
+  #noscript-warning {
+    color: #8a1216; text-align: center; padding-top: 40vh;
+    font-size: 22px; letter-spacing: 4px;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<noscript><div id="noscript-warning">THE TOWN NEEDS JAVASCRIPT TO WAKE UP.</div></noscript>
+<script src="engine.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
